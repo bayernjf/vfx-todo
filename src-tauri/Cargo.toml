@@ -28,3 +28,6 @@ tauri-plugin-log = "2"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+chrono = "0.4"

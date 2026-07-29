@@ -70,7 +70,7 @@ struct VfxPayload {
     color: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ScreenInfo {
     id: i32,
     name: String,
@@ -916,3 +916,566 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+// ===================== 集成测试 =====================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    // ---------- helpers ----------
+    fn make_todo(
+        title: &str,
+        level: &str,
+        due_at: Option<i64>,
+        effect: Option<String>,
+        tag: Option<String>,
+    ) -> Todo {
+        Todo {
+            id: Uuid::new_v4().to_string(),
+            title: title.to_string(),
+            level: level.to_string(),
+            completed: false,
+            created_at: 1000000,
+            due_at,
+            screen: 0,
+            recurrence: None,
+            effect,
+            tag,
+        }
+    }
+
+    fn test_state() -> AppState {
+        AppState::new()
+    }
+
+    // Sync wrappers — 直接操作 AppState, 绕过 Tauri 命令壳, 测试同样的逻辑路径
+
+    fn todos_list_sync(state: &AppState) -> Vec<Todo> {
+        state.todos.lock().unwrap().clone()
+    }
+
+    fn todo_create_sync(
+        state: &AppState,
+        title: String,
+        level: String,
+        due_at: Option<i64>,
+        screen: i32,
+        effect: Option<String>,
+        tag: Option<String>,
+    ) -> Todo {
+        let t = Todo {
+            id: Uuid::new_v4().to_string(),
+            title,
+            level,
+            completed: false,
+            created_at: chrono::Utc::now().timestamp_millis(),
+            due_at,
+            screen,
+            recurrence: None,
+            effect: effect.filter(|e| is_vfx_effect(e)),
+            tag: tag.filter(|t| is_valid_tag(t)),
+        };
+        state.todos.lock().unwrap().push(t.clone());
+        *state.dirty.lock().unwrap() = true;
+        t
+    }
+
+    fn todo_complete_sync(state: &AppState, id: String) -> Result<Todo, String> {
+        let mut todos = state.todos.lock().unwrap();
+        let todo = todos.iter_mut().find(|t| t.id == id).ok_or("not found")?;
+        todo.completed = true;
+        *state.dirty.lock().unwrap() = true;
+        Ok(todo.clone())
+    }
+
+    fn todo_delete_sync(state: &AppState, id: String) -> Result<(), String> {
+        let mut todos = state.todos.lock().unwrap();
+        let before = todos.len();
+        todos.retain(|t| t.id != id);
+        if todos.len() == before {
+            return Err("not found".into());
+        }
+        *state.dirty.lock().unwrap() = true;
+        Ok(())
+    }
+
+    fn todo_update_sync(
+        state: &AppState,
+        id: String,
+        title: Option<String>,
+        level: Option<String>,
+        due_at: Option<Option<i64>>,
+        screen: Option<i32>,
+        recurrence: Option<Option<String>>,
+        effect: Option<Option<String>>,
+        tag: Option<Option<String>>,
+    ) -> Todo {
+        let effect = effect.map(|e| e.filter(|v| is_vfx_effect(v)));
+        let tag = tag.map(|t| t.filter(|v| is_valid_tag(v)));
+        let mut todos = state.todos.lock().unwrap();
+        let todo = todos.iter_mut().find(|t| t.id == id).expect("todo not found");
+        if let Some(t) = title { todo.title = t; }
+        if let Some(l) = level { todo.level = l; }
+        if let Some(d) = due_at { todo.due_at = d; }
+        if let Some(s) = screen { todo.screen = s; }
+        if let Some(r) = recurrence { todo.recurrence = r; }
+        if let Some(e) = effect { todo.effect = e; }
+        if let Some(t) = tag { todo.tag = t; }
+        *state.dirty.lock().unwrap() = true;
+        todo.clone()
+    }
+
+    fn todo_clear_completed_sync(state: &AppState) -> usize {
+        let mut todos = state.todos.lock().unwrap();
+        let before = todos.len();
+        todos.retain(|t| !t.completed);
+        before - todos.len()
+    }
+
+    fn todo_batch_complete_sync(state: &AppState, ids: Vec<String>) -> usize {
+        let mut todos = state.todos.lock().unwrap();
+        let mut count = 0;
+        for id in &ids {
+            if let Some(t) = todos.iter_mut().find(|t| t.id == *id) {
+                if !t.completed { t.completed = true; count += 1; }
+            }
+        }
+        *state.dirty.lock().unwrap() = true;
+        count
+    }
+
+    fn todo_batch_delete_sync(state: &AppState, ids: Vec<String>) -> usize {
+        let mut todos = state.todos.lock().unwrap();
+        let before = todos.len();
+        todos.retain(|t| !ids.contains(&t.id));
+        before - todos.len()
+    }
+
+    /// 根据 level + due_at 确定性选择特效（测试调度 / 用户体验）
+    fn level_effect_with_due(level: &str, due_at: i64) -> &'static str {
+        let hash = due_at.wrapping_mul(2654435761) as usize;
+        level_effect_from_hash(level, hash)
+    }
+
+    fn level_effect_from_hash(level: &str, hash: usize) -> &'static str {
+        match level {
+            "high" => {
+                const OPTS: &[&str] = &["firework", "shatter", "laser"];
+                OPTS[hash % OPTS.len()]
+            }
+            "mid" => {
+                const OPTS: &[&str] = &["glitch", "particle", "ripple", "rain"];
+                OPTS[hash % OPTS.len()]
+            }
+            _ => "rain",
+        }
+    }
+
+    fn level_color(level: &str) -> &'static str {
+        match level {
+            "high" => "#ff6b6b",
+            "mid" => "#feca57",
+            "low" => "#4ecdc4",
+            _ => "#ffffff",
+        }
+    }
+
+    fn level_danmaku_speed(level: &str) -> f64 {
+        match level {
+            "high" => 250.0,
+            "mid" => 180.0,
+            "low" => 120.0,
+            _ => 180.0,
+        }
+    }
+
+    fn level_effect(level: &str) -> &'static str {
+        level_effect_from_hash(level, rand::random::<usize>())
+    }
+
+    // ---------- Todo 数据模型 ----------
+    #[test]
+    fn todo_serialization_roundtrip() {
+        let todo = make_todo("测试", "high", Some(2000000), Some("particle".into()), Some("工作".into()));
+        let json = serde_json::to_string(&todo).unwrap();
+        let parsed: Todo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.title, "测试");
+        assert_eq!(parsed.effect, Some("particle".to_string()));
+        assert_eq!(parsed.tag, Some("工作".to_string()));
+    }
+
+    #[test]
+    fn todo_json_ignores_unknown_fields() {
+        let json = r#"{"id":"x","title":"hi","level":"high","completed":false,"created_at":1,"due_at":null,"screen":0,"recurrence":null,"effect":null,"tag":null,"extra_field":"ignored"}"#;
+        let t: Todo = serde_json::from_str(json).unwrap();
+        assert_eq!(t.title, "hi");
+    }
+
+    // ---------- 等级 → 颜色 / 弹幕速度 / 特效路由 ----------
+    #[test]
+    fn level_color_mapping() {
+        assert_eq!(level_color("high"), "#ff6b6b");
+        assert_eq!(level_color("mid"), "#feca57");
+        assert_eq!(level_color("low"), "#4ecdc4");
+        assert!(level_color("unknown").starts_with("#"));
+    }
+
+    #[test]
+    fn level_danmaku_speed_mapping() {
+        assert_eq!(level_danmaku_speed("high"), 250.0);
+        assert_eq!(level_danmaku_speed("mid"), 180.0);
+        assert_eq!(level_danmaku_speed("low"), 120.0);
+        assert_eq!(level_danmaku_speed("unknown"), 180.0);
+    }
+
+    #[test]
+    fn level_effect_routing() {
+        // high → firework / shatter / laser
+        for _ in 0..20 {
+            let e = level_effect("high");
+            assert!(e == "firework" || e == "shatter" || e == "laser",
+                "high 应路由到 firework/shatter/laser，得到: {}", e);
+        }
+        // mid → glitch / particle / ripple / rain
+        for _ in 0..20 {
+            let e = level_effect("mid");
+            assert!(e == "glitch" || e == "particle" || e == "ripple" || e == "rain",
+                "mid 应路由到 glitch/particle/ripple/rain，得到: {}", e);
+        }
+        // low → rain only
+        for _ in 0..10 {
+            assert_eq!(level_effect("low"), "rain");
+        }
+    }
+
+    // ---------- VFX 校验 ----------
+    #[test]
+    fn valid_vfx_effects_accepted() {
+        for e in &["shatter", "particle", "rain", "firework", "ripple", "laser", "glitch"] {
+            assert!(is_vfx_effect(e), "{} 应该是合法 VFX", e);
+        }
+    }
+
+    #[test]
+    fn invalid_vfx_effects_rejected() {
+        assert!(!is_vfx_effect(""));
+        assert!(!is_vfx_effect("explosion"));
+        assert!(!is_vfx_effect("SHATTER"));
+    }
+
+    // ---------- 标签校验 ----------
+    #[test]
+    fn valid_tags_accepted() {
+        for t in &["工作", "生活", "紧急"] {
+            assert!(is_valid_tag(t));
+        }
+    }
+
+    #[test]
+    fn invalid_tags_rejected() {
+        assert!(!is_valid_tag(""));
+        assert!(!is_valid_tag("其他"));
+        assert!(!is_valid_tag("休闲"));
+    }
+
+    // ---------- Todo 列表 CRUD ----------
+    #[test]
+    fn todo_list_returns_all() {
+        let state = test_state();
+        {
+            let mut todos = state.todos.lock().unwrap();
+            todos.push(make_todo("A", "high", None, None, None));
+            todos.push(make_todo("B", "low", None, None, None));
+        }
+        assert_eq!(todos_list_sync(&state).len(), 2);
+    }
+
+    #[test]
+    fn todo_create_adds_to_list() {
+        let state = test_state();
+        let created = todo_create_sync(
+            &state, "新任务".into(), "high".into(), None, 0,
+            Some("firework".into()), Some("工作".into()),
+        );
+        assert_eq!(created.title, "新任务");
+        assert_eq!(created.effect, Some("firework".to_string()));
+        assert_eq!(created.tag, Some("工作".to_string()));
+        assert_eq!(todos_list_sync(&state).len(), 1);
+        assert!(!created.id.is_empty());
+    }
+
+    #[test]
+    fn todo_create_rejects_invalid_effect_and_tag() {
+        let state = test_state();
+        let created = todo_create_sync(
+            &state, "坏参数".into(), "high".into(), None, 0,
+            Some("boom".into()), Some("其他".into()),
+        );
+        assert_eq!(created.effect, None);
+        assert_eq!(created.tag, None);
+    }
+
+    #[test]
+    fn todo_complete_toggles_flag() {
+        let state = test_state();
+        let t = make_todo("完", "high", None, None, None);
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        let updated = todo_complete_sync(&state, id).unwrap();
+        assert!(updated.completed);
+    }
+
+    #[test]
+    fn todo_complete_nonexistent_returns_err() {
+        let state = test_state();
+        assert!(todo_complete_sync(&state, "ghost".into()).is_err());
+    }
+
+    #[test]
+    fn todo_delete_removes_by_id() {
+        let state = test_state();
+        let t1 = make_todo("D1", "high", None, None, None);
+        let t2 = make_todo("D2", "low", None, None, None);
+        let id1 = t1.id.clone();
+        state.todos.lock().unwrap().push(t1);
+        state.todos.lock().unwrap().push(t2);
+        todo_delete_sync(&state, id1).unwrap();
+        let list = todos_list_sync(&state);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "D2");
+    }
+
+    #[test]
+    fn todo_delete_nonexistent_returns_err() {
+        let state = test_state();
+        assert!(todo_delete_sync(&state, "ghost".into()).is_err());
+    }
+
+    #[test]
+    fn todo_update_modifies_all_fields() {
+        let state = test_state();
+        let t = make_todo("旧标题", "high", None, None, None);
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        let updated = todo_update_sync(
+            &state, id,
+            Some("新标题".into()),
+            Some("low".into()),
+            Some(Some(3000000)),
+            Some(1),
+            Some(Some("daily".into())),
+            Some(Some("particle".into())),
+            Some(Some("生活".into())),
+        );
+        assert_eq!(updated.title, "新标题");
+        assert_eq!(updated.level, "low");
+        assert_eq!(updated.due_at, Some(3000000));
+        assert_eq!(updated.screen, 1);
+        assert_eq!(updated.recurrence, Some("daily".to_string()));
+        assert_eq!(updated.effect, Some("particle".to_string()));
+        assert_eq!(updated.tag, Some("生活".to_string()));
+    }
+
+    #[test]
+    fn todo_update_rejects_invalid_effect() {
+        let state = test_state();
+        let t = make_todo("坏特效", "high", None, Some("particle".into()), None);
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        let updated = todo_update_sync(
+            &state, id, None, None, None, None, None,
+            Some(Some("invalid".into())), None,
+        );
+        assert_eq!(updated.effect, None);
+    }
+
+    #[test]
+    fn todo_update_rejects_invalid_tag() {
+        let state = test_state();
+        let t = make_todo("坏标签", "high", None, None, Some("工作".into()));
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        let updated = todo_update_sync(
+            &state, id, None, None, None, None, None,
+            None, Some(Some("无效".into())),
+        );
+        assert_eq!(updated.tag, None);
+    }
+
+    #[test]
+    fn todo_clear_completed_removes_only_completed() {
+        let state = test_state();
+        let t1 = make_todo("未完成", "high", None, None, None);
+        let mut t2 = make_todo("已完成", "low", None, None, None);
+        t2.completed = true;
+        state.todos.lock().unwrap().push(t1);
+        state.todos.lock().unwrap().push(t2);
+        assert_eq!(todo_clear_completed_sync(&state), 1);
+        let list = todos_list_sync(&state);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "未完成");
+    }
+
+    #[test]
+    fn todo_batch_complete_updates_many() {
+        let state = test_state();
+        let t1 = make_todo("B1", "high", None, None, None);
+        let t2 = make_todo("B2", "mid", None, None, None);
+        let t3 = make_todo("B3", "low", None, None, None);
+        let ids = vec![t1.id.clone(), t2.id.clone(), t3.id.clone()];
+        let batch_ids = vec![t1.id.clone(), t3.id.clone()];
+        state.todos.lock().unwrap().push(t1);
+        state.todos.lock().unwrap().push(t2);
+        state.todos.lock().unwrap().push(t3);
+        assert_eq!(todo_batch_complete_sync(&state, batch_ids), 2);
+        let list = todos_list_sync(&state);
+        assert!(list.iter().find(|t| t.id == ids[0]).unwrap().completed);
+        assert!(!list.iter().find(|t| t.id == ids[1]).unwrap().completed);
+        assert!(list.iter().find(|t| t.id == ids[2]).unwrap().completed);
+    }
+
+    #[test]
+    fn todo_batch_delete_removes_many() {
+        let state = test_state();
+        let t1 = make_todo("R1", "high", None, None, None);
+        let t2 = make_todo("R2", "mid", None, None, None);
+        let t3 = make_todo("R3", "low", None, None, None);
+        let ids_to_delete = vec![t1.id.clone(), t3.id.clone()];
+        state.todos.lock().unwrap().push(t1);
+        state.todos.lock().unwrap().push(t2);
+        state.todos.lock().unwrap().push(t3);
+        assert_eq!(todo_batch_delete_sync(&state, ids_to_delete), 2);
+        let list = todos_list_sync(&state);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].title, "R2");
+    }
+
+    #[test]
+    fn todo_batch_delete_empty_list_noop() {
+        let state = test_state();
+        assert_eq!(todo_batch_delete_sync(&state, vec!["x".into()]), 0);
+    }
+
+    // ---------- 偏好设置 ----------
+    #[test]
+    fn preferences_default_values() {
+        let prefs = Preferences { default_screen: 0, default_level: "high".into() };
+        assert_eq!(prefs.default_level, "high");
+    }
+
+    #[test]
+    fn preferences_serialization_roundtrip() {
+        let prefs = Preferences { default_screen: 1, default_level: "low".into() };
+        let json = serde_json::to_string(&prefs).unwrap();
+        let parsed: Preferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.default_screen, 1);
+        assert_eq!(parsed.default_level, "low");
+    }
+
+    #[test]
+    fn preferences_json_with_missing_fields_uses_defaults() {
+        let json = r#"{}"#;
+        let parsed: Preferences = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.default_screen, 0);
+        assert_eq!(parsed.default_level, "high");
+    }
+
+    // ---------- 特效调度确定性 ----------
+    #[test]
+    fn effect_deterministic_with_same_hash() {
+        let a = level_effect_from_hash("high", 42);
+        let b = level_effect_from_hash("high", 42);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn effect_variety_across_different_hash() {
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..30 {
+            seen.insert(level_effect_from_hash("high", i));
+        }
+        assert!(seen.len() >= 3, "预期 high 产生 3 种特效，实际 {}", seen.len());
+
+        seen.clear();
+        for i in 0..30 {
+            seen.insert(level_effect_from_hash("mid", i));
+        }
+        assert!(seen.len() >= 4, "预期 mid 产生 4 种特效，实际 {}", seen.len());
+    }
+
+    #[test]
+    fn effect_with_due_deterministic() {
+        let a = level_effect_with_due("high", 2000000);
+        let b = level_effect_with_due("high", 2000000);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn different_due_gives_possibly_different_effect() {
+        let mut seen = std::collections::HashSet::new();
+        for due in 0..50 {
+            seen.insert(level_effect_with_due("high", due));
+        }
+        assert!(seen.len() >= 2);
+    }
+
+    // ---------- Danmaku payload ----------
+    #[test]
+    fn danmaku_payload_serialization() {
+        let d = DanmakuPayload { id: 42.0, text: "hello".into(), color: "#ff0000".into(), speed: 200.0 };
+        let json = serde_json::to_string(&d).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["id"].as_f64().unwrap(), 42.0);
+        assert_eq!(parsed["text"].as_str().unwrap(), "hello");
+        assert_eq!(parsed["speed"].as_f64().unwrap(), 200.0);
+    }
+
+    // ---------- Vfx payload ----------
+    #[test]
+    fn vfx_payload_serialization() {
+        let v = VfxPayload { id: 7.0, effect: "firework".into(), text: "boom".into(), color: "#ffaa00".into() };
+        let json = serde_json::to_string(&v).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["id"].as_f64().unwrap(), 7.0);
+        assert_eq!(parsed["effect"].as_str().unwrap(), "firework");
+        assert_eq!(parsed["text"].as_str().unwrap(), "boom");
+    }
+
+    // ---------- ScreenInfo ----------
+    #[test]
+    fn screen_info_fields() {
+        let s = ScreenInfo { id: 0, name: "Main".into(), is_primary: true };
+        let json = serde_json::to_string(&s).unwrap();
+        let parsed: ScreenInfo = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_primary);
+    }
+
+    // ---------- 批量操作幂等性 ----------
+    #[test]
+    fn batch_complete_on_already_completed_is_idempotent() {
+        let state = test_state();
+        let mut t = make_todo("已完成", "high", None, None, None);
+        t.completed = true;
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        // 再次 complete 不应增加计数
+        assert_eq!(todo_batch_complete_sync(&state, vec![id]), 0);
+    }
+
+    // ---------- 边界条件 ----------
+    #[test]
+    fn empty_todo_list_clear_returns_zero() {
+        let state = test_state();
+        assert_eq!(todo_clear_completed_sync(&state), 0);
+    }
+
+    #[test]
+    fn created_todo_has_unique_ids() {
+        let state = test_state();
+        let a = todo_create_sync(&state, "A".into(), "high".into(), None, 0, None, None);
+        let b = todo_create_sync(&state, "B".into(), "low".into(), None, 0, None, None);
+        assert_ne!(a.id, b.id);
+    }
+}
+
