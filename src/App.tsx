@@ -54,6 +54,7 @@ function App() {
   const [input, setInput] = useState("");
   const [level, setLevel] = useState<Level>("low");
   const [dueInMin, setDueInMin] = useState<number | null>(null);
+  const [customDue, setCustomDue] = useState("");
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
   const [, setTick] = useState(0);
@@ -84,8 +85,12 @@ function App() {
   const addTodo = async () => {
     const title = input.trim();
     if (!title) return;
-    const dueAt =
-      dueInMin !== null ? Date.now() + dueInMin * 60_000 : null;
+    let dueAt: number | null = null;
+    if (customDue) {
+      dueAt = new Date(customDue).getTime();
+    } else if (dueInMin !== null) {
+      dueAt = Date.now() + dueInMin * 60_000;
+    }
     const todo = await invoke<Todo>("todo_create", {
       title,
       level,
@@ -95,6 +100,7 @@ function App() {
     setTodos((prev) => [...prev, todo]);
     setInput("");
     setDueInMin(null);
+    setCustomDue("");
   };
 
   const completeTodo = async (id: string) => {
@@ -204,12 +210,31 @@ function App() {
           <button
             key={p.mins}
             className={`due-btn ${dueInMin === p.mins ? "active" : ""}`}
-            onClick={() => setDueInMin(dueInMin === p.mins ? null : p.mins)}
+            onClick={() => {
+              setDueInMin(dueInMin === p.mins ? null : p.mins);
+              setCustomDue("");
+            }}
           >
             {p.label}
           </button>
         ))}
-        {dueInMin !== null && <span className="due-hint">已选 {dueInMin} 分钟后触发</span>}
+        <input
+          type="datetime-local"
+          className="due-datetime"
+          value={customDue}
+          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+          onChange={(e) => {
+            setCustomDue(e.target.value);
+            setDueInMin(null);
+          }}
+        />
+        {(dueInMin !== null || customDue) && (
+          <span className="due-hint">
+            {customDue
+              ? `已选 ${new Date(customDue).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+              : `已选 ${dueInMin} 分钟后触发`}
+          </span>
+        )}
       </div>
 
       <div className="danmaku-bar">

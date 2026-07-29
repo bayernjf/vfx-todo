@@ -250,6 +250,27 @@ body:not(.overlay-mode) {
   color: #4ecdc4;
 }
 
+.due-datetime {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  color: #e5e5e5;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+}
+
+.due-datetime:focus {
+  border-color: #6054f1;
+}
+
+.due-datetime::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+
 .console-hint {
   font-size: 11px;
   color: rgba(229, 229, 229, 0.35);
