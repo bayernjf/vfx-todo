@@ -18,6 +18,8 @@ struct Todo {
     due_at: Option<i64>,
     #[serde(default)]
     screen: i32, // 目标屏幕 index，0 = 主屏
+    #[serde(default)]
+    recurrence: Option<String>, // "daily" | "weekly"
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -174,6 +176,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
             let mut todos = state.todos.lock().unwrap();
             let mut changed = false;
 
+            let mut new_todos = Vec::new();
             for todo in todos.iter_mut() {
                 // 未完成 + 有到期时间 + 已到期 → 按 level 触发 + 标记完成
                 if !todo.completed {
@@ -182,9 +185,34 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                             dispatch_by_level(&app, &todo.title, &todo.level, todo.screen);
                             todo.completed = true;
                             changed = true;
+
+                            // 重复任务：自动创建下一个实例
+                            if let Some(ref rec) = todo.recurrence {
+                                let next_due = match rec.as_str() {
+                                    "daily" => due + 24 * 60 * 60 * 1000,
+                                    "weekly" => due + 7 * 24 * 60 * 60 * 1000,
+                                    _ => due,
+                                };
+                                if next_due > due {
+                                    new_todos.push(Todo {
+                                        id: gen_id(),
+                                        title: todo.title.clone(),
+                                        level: todo.level.clone(),
+                                        completed: false,
+                                        created_at: now,
+                                        due_at: Some(next_due),
+                                        screen: todo.screen,
+                                        recurrence: todo.recurrence.clone(),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
+            }
+            if !new_todos.is_empty() {
+                todos.extend(new_todos);
+                changed = true;
             }
 
             if changed {
@@ -272,6 +300,7 @@ fn todo_create(
     level: String,
     due_at: Option<i64>,
     screen: Option<i32>,
+    recurrence: Option<String>,
 ) -> Result<Todo, String> {
     let mut todos = state.todos.lock().unwrap();
     let todo = Todo {
@@ -282,6 +311,7 @@ fn todo_create(
         created_at: js_sys_now(),
         due_at,
         screen: screen.unwrap_or(0),
+        recurrence,
     };
     todos.push(todo.clone());
     *state.dirty.lock().unwrap() = true;

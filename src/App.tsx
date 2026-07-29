@@ -12,6 +12,7 @@ interface Todo {
   created_at: number;
   due_at: number | null;
   screen?: number;
+  recurrence?: string | null;
 }
 
 interface ScreenInfo {
@@ -60,6 +61,7 @@ function App() {
   const [, setTick] = useState(0);
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
   const [targetScreen, setTargetScreen] = useState(0);
+  const [recurrence, setRecurrence] = useState<string | null>(null);
 
   const refresh = () => {
     invoke<Todo[]>("todo_list")
@@ -96,11 +98,13 @@ function App() {
       level,
       dueAt,
       screen: targetScreen,
+      recurrence,
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
     setDueInMin(null);
     setCustomDue("");
+    setRecurrence(null);
   };
 
   const completeTodo = async (id: string) => {
@@ -165,6 +169,11 @@ function App() {
                   onClick={() => !todo.completed && triggerTodoDanmaku(todo)}
                 >
                   {todo.title}
+                  {todo.recurrence && (
+                    <span className="recurrence-badge">
+                      {todo.recurrence === "daily" ? "每天" : "每周"}
+                    </span>
+                  )}
                 </span>
                 {todo.due_at && !todo.completed && (
                   <span className="todo-due">{formatDue(todo.due_at)}</span>
@@ -235,6 +244,22 @@ function App() {
               : `已选 ${dueInMin} 分钟后触发`}
           </span>
         )}
+      </div>
+      <div className="recurrence-presets">
+        <span className="due-label">重复：</span>
+        {[
+          { value: null, label: "不重复" },
+          { value: "daily", label: "每天" },
+          { value: "weekly", label: "每周" },
+        ].map((r) => (
+          <button
+            key={r.label}
+            className={`due-btn ${recurrence === r.value ? "active" : ""}`}
+            onClick={() => setRecurrence(r.value)}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
 
       <div className="danmaku-bar">
