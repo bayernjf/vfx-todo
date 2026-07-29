@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{Emitter, Manager, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
 
 
 
@@ -73,6 +74,17 @@ struct ScreenInfo {
     id: i32,
     name: String,
     is_primary: bool,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Preferences {
+    #[serde(default)]
+    default_screen: i32,
+    #[serde(default = "default_level")]
+    default_level: String,
+}
+fn default_level() -> String {
+    "high".to_string()
 }
 
 #[derive(Clone)]
@@ -241,6 +253,13 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                 todo.screen,
                                 todo.effect.as_deref(),
                             );
+                            // 系统通知
+                            let _ = app
+                                .notification()
+                                .builder()
+                                .title("VFX Todo")
+                                .body(&format!("到期: {}", todo.title))
+                                .show();
                             todo.completed = true;
                             changed = true;
 
@@ -367,6 +386,30 @@ fn tag_list() -> Vec<&'static str> {
 }
 
 #[tauri::command]
+fn load_prefs(app: tauri::AppHandle) -> Result<Preferences, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let prefs_path = app_dir.join("prefs.json");
+    if prefs_path.exists() {
+        let content = std::fs::read_to_string(&prefs_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())
+    } else {
+        Ok(Preferences {
+            default_screen: 0,
+            default_level: "high".to_string(),
+        })
+    }
+}
+
+#[tauri::command]
+fn save_prefs(app: tauri::AppHandle, prefs: Preferences) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
+    let prefs_path = app_dir.join("prefs.json");
+    let content = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
+    std::fs::write(&prefs_path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn todo_create(
     state: tauri::State<'_, AppState>,
     title: String,
@@ -426,11 +469,60 @@ fn todo_complete(state: tauri::State<'_, AppState>, id: String) -> Result<(), St
 }
 
 #[tauri::command]
+fn todo_update(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    title: Option<String>,
+    level: Option<String>,
+    due_at: Option<Option<i64>>,
+    screen: Option<i32>,
+    recurrence: Option<Option<String>>,
+    effect: Option<Option<String>>,
+    tag: Option<Option<String>>,
+) -> Result<Todo, String> {
+    // 校验 effect（仅接受 VFX_EFFECTS 内的值或 None）
+    let effect = effect.map(|e| {
+        e.and_then(|v| {
+            if is_vfx_effect(&v) { Some(v) } else { None }
+        })
+    });
+    let tag = tag.map(|t| {
+        t.and_then(|v| {
+            if is_valid_tag(&v) { Some(v) } else { None }
+        })
+    });
+    let mut todos = state.todos.lock().unwrap();
+    let todo = todos.iter_mut().find(|t| t.id == id).ok_or("todo not found")?;
+    if let Some(t) = title { todo.title = t; }
+    if let Some(l) = level { todo.level = l; }
+    if let Some(d) = due_at { todo.due_at = d; }
+    if let Some(s) = screen { todo.screen = s; }
+    if let Some(r) = recurrence { todo.recurrence = r; }
+    if let Some(e) = effect { todo.effect = e; }
+    if let Some(t) = tag { todo.tag = t; }
+    let updated = todo.clone();
+    *state.dirty.lock().unwrap() = true;
+    Ok(updated)
+}
+
+#[tauri::command]
 fn todo_delete(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
     let mut todos = state.todos.lock().unwrap();
     todos.retain(|t| t.id != id);
     *state.dirty.lock().unwrap() = true;
     Ok(())
+}
+
+#[tauri::command]
+fn todo_clear_completed(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    let mut todos = state.todos.lock().unwrap();
+    let before = todos.len();
+    todos.retain(|t| !t.completed);
+    let removed = before - todos.len();
+    if removed > 0 {
+        *state.dirty.lock().unwrap() = true;
+    }
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -697,6 +789,7 @@ fn register_global_shortcuts(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, event| {
             if event.state == ShortcutState::Pressed {
@@ -762,7 +855,11 @@ pub fn run() {
             todo_list,
             todo_create,
             todo_complete,
+            todo_update,
             todo_delete,
+            todo_clear_completed,
+            load_prefs,
+            save_prefs,
             export_todos,
             import_todos,
             tag_list,

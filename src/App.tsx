@@ -37,6 +37,11 @@ interface ScreenInfo {
   is_primary: boolean;
 }
 
+interface Preferences {
+  default_screen: number;
+  default_level: string;
+}
+
 const LEVEL_LABEL: Record<Level, string> = {
   low: "弹幕",
   mid: "粒子",
@@ -83,6 +88,10 @@ const DUE_PRESETS: { label: string; mins: number }[] = [
   { label: "+30m", mins: 30 },
 ];
 
+// ══════════════════════════════════════════
+// 工具函数
+// ══════════════════════════════════════════
+
 function formatDue(dueAt: number | null): string {
   if (!dueAt) return "";
   const now = Date.now();
@@ -94,24 +103,232 @@ function formatDue(dueAt: number | null): string {
   return `${secs}秒后`;
 }
 
+function formatDateTime(ts: number | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function addMins(mins: number): number {
+  return Date.now() + mins * 60_000;
+}
+
+// ══════════════════════════════════════════
+// 编辑态表单（内联渲染在 TodoItem 中）
+// ══════════════════════════════════════════
+
+interface EditState {
+  title: string;
+  level: Level;
+  dueAt: number | null;
+  duePreset: number | null; // mins
+  customDue: string; // datetime-local value
+  screen: number;
+  recurrence: string | null;
+  effect: EffectType | "";
+  tag: TagType | "";
+}
+
+function EditForm({
+  edit,
+  screens,
+  onSave,
+  onCancel,
+  onChange,
+}: {
+  edit: EditState;
+  screens: ScreenInfo[];
+  onSave: () => void;
+  onCancel: () => void;
+  onChange: (patch: Partial<EditState>) => void;
+}) {
+  return (
+    <div className="edit-form">
+      <input
+        className="edit-title-input"
+        value={edit.title}
+        onChange={(e) => onChange({ title: e.target.value })}
+        placeholder="待办标题"
+        autoFocus
+        onKeyDown={(e) => e.key === "Enter" && onSave()}
+      />
+      <div className="edit-row">
+        <select
+          value={edit.level}
+          onChange={(e) => onChange({ level: e.target.value as Level })}
+        >
+          <option value="low">弹幕</option>
+          <option value="mid">粒子</option>
+          <option value="high">破碎</option>
+        </select>
+        <select
+          value={edit.effect}
+          onChange={(e) => onChange({ effect: e.target.value as EffectType | "" })}
+        >
+          <option value="">默认（按 level）</option>
+          {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
+            <option key={k} value={k}>{EFFECT_LABEL[k]}</option>
+          ))}
+        </select>
+        <select
+          value={edit.tag}
+          onChange={(e) => onChange({ tag: e.target.value as TagType | "" })}
+        >
+          <option value="">无标签</option>
+          {TAGS.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+        <select
+          value={edit.screen}
+          onChange={(e) => onChange({ screen: Number(e.target.value) })}
+        >
+          {screens.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.is_primary ? "主屏" : `屏 ${s.id + 1}`}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="edit-row">
+        <span className="due-label">到期：</span>
+        {DUE_PRESETS.map((p) => (
+          <button
+            key={p.mins}
+            className={`due-btn ${edit.duePreset === p.mins ? "active" : ""}`}
+            onClick={() =>
+              onChange({
+                duePreset: edit.duePreset === p.mins ? null : p.mins,
+                dueAt: edit.duePreset === p.mins ? null : addMins(p.mins),
+                customDue: "",
+              })
+            }
+          >
+            {p.label}
+          </button>
+        ))}
+        <input
+          type="datetime-local"
+          className="due-datetime"
+          value={edit.customDue}
+          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+            .toISOString()
+            .slice(0, 16)}
+          onChange={(e) => {
+            const val = e.target.value;
+            const ts = val ? new Date(val).getTime() : null;
+            onChange({ customDue: val, dueAt: ts, duePreset: null });
+          }}
+        />
+        <span className="due-label">重复：</span>
+        {[
+          { value: null, label: "不重复" },
+          { value: "daily", label: "每天" },
+          { value: "weekly", label: "每周" },
+        ].map((r) => (
+          <button
+            key={r.label}
+            className={`due-btn ${edit.recurrence === r.value ? "active" : ""}`}
+            onClick={() => onChange({ recurrence: r.value })}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      <div className="edit-actions">
+        <button className="todo-btn save" onClick={onSave}>保存</button>
+        <button className="todo-btn cancel" onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+// TodoItem
+// ══════════════════════════════════════════
+
 function TodoItem({
   todo,
+  screens,
   onComplete,
   onDelete,
   onTrigger,
+  onUpdate,
 }: {
   todo: Todo;
+  screens: ScreenInfo[];
   onComplete: (id: string) => void;
   onDelete: (id: string) => void;
   onTrigger: (todo: Todo) => void;
+  onUpdate: (id: string, patch: Record<string, unknown>) => void;
 }) {
   const [, setTick] = useState(0);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!todo.due_at || todo.completed) return;
     const timer = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(timer);
   }, [todo.due_at, todo.completed]);
+
+  // 编辑态 → 展示内联表单
+  if (editing) {
+    const editFromTodo = (): EditState => {
+      const hasPreset = todo.due_at && DUE_PRESETS.some((p) => todo.due_at! <= Date.now() + p.mins * 60000 + 5000 && todo.due_at! >= Date.now() + p.mins * 60000 - 5000);
+      return {
+        title: todo.title,
+        level: todo.level,
+        dueAt: todo.due_at,
+        duePreset: hasPreset
+          ? DUE_PRESETS.find(
+              (p) => Math.abs(todo.due_at! - (Date.now() + p.mins * 60000)) < 10000
+            )?.mins ?? null
+          : null,
+        customDue: todo.due_at
+          ? new Date(todo.due_at).toISOString().slice(0, 16)
+          : "",
+        screen: todo.screen ?? 0,
+        recurrence: todo.recurrence ?? null,
+        effect: todo.effect ?? "",
+        tag: todo.tag ?? "",
+      };
+    };
+
+    const edit = editFromTodo();
+
+    return (
+      <div className="todo-item editing">
+        <EditForm
+          edit={edit}
+          screens={screens}
+          onSave={() => {
+            const patch: Record<string, unknown> = {};
+            if (edit.title !== todo.title) patch.title = edit.title;
+            if (edit.level !== todo.level) patch.level = edit.level;
+            if (edit.dueAt !== todo.due_at) patch.due_at = edit.dueAt;
+            if (edit.screen !== (todo.screen ?? 0)) patch.screen = edit.screen;
+            if (edit.recurrence !== (todo.recurrence ?? null)) patch.recurrence = edit.recurrence;
+            if (edit.effect !== (todo.effect ?? "")) patch.effect = edit.effect || null;
+            if (edit.tag !== (todo.tag ?? "")) patch.tag = edit.tag || null;
+            if (Object.keys(patch).length > 0) {
+              onUpdate(todo.id, patch);
+            }
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+          onChange={(patch) => {
+            // 由 EditForm 的本地状态自己管理
+            Object.assign(edit, patch);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -158,13 +375,20 @@ function TodoItem({
           )}
         </span>
         {todo.due_at && !todo.completed && (
-          <span className="todo-due">{formatDue(todo.due_at)}</span>
+          <span className="todo-due" title={formatDateTime(todo.due_at)}>
+            {formatDue(todo.due_at)}
+          </span>
         )}
       </div>
       {!todo.completed && (
-        <button className="todo-btn complete" onClick={() => onComplete(todo.id)}>
-          完成
-        </button>
+        <>
+          <button className="todo-btn edit" onClick={() => setEditing(true)}>
+            编辑
+          </button>
+          <button className="todo-btn complete" onClick={() => onComplete(todo.id)}>
+            完成
+          </button>
+        </>
       )}
       <button className="todo-btn delete" onClick={() => onDelete(todo.id)}>
         删除
@@ -172,6 +396,10 @@ function TodoItem({
     </div>
   );
 }
+
+// ══════════════════════════════════════════
+// App 主组件
+// ══════════════════════════════════════════
 
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -184,18 +412,37 @@ function App() {
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
   const [targetScreen, setTargetScreen] = useState(0);
   const [recurrence, setRecurrence] = useState<string | null>(null);
-  // 选具体特效时覆盖 level 默认派发；空字符串 = 按 level 默认
   const [effect, setEffect] = useState<EffectType | "">("");
-  // 标签筛选：空 = 全部，否则只看该标签的待办
   const [filterTag, setFilterTag] = useState<TagType | "">("");
-  // 新建待办时选的标签
   const [newTag, setNewTag] = useState<TagType | "">("");
+
+  // Feature 3: 搜索
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Feature 2: 显示已完成
+  const [showCompleted, setShowCompleted] = useState(true);
 
   const refresh = (tag?: string) => {
     invoke<Todo[]>("todo_list", { tag: tag || null })
       .then(setTodos)
       .catch(console.error);
   };
+
+  // Feature 5: 加载偏好设置
+  const [prefs, setPrefs] = useState<Preferences>({
+    default_screen: 0,
+    default_level: "high",
+  });
+
+  useEffect(() => {
+    invoke<Preferences>("load_prefs")
+      .then((p) => {
+        setPrefs(p);
+        setLevel(p.default_level as Level);
+        setTargetScreen(p.default_screen);
+      })
+      .catch(() => {}); // 首次启动无文件，正常
+  }, []);
 
   useEffect(() => {
     refresh(filterTag || undefined);
@@ -247,8 +494,25 @@ function App() {
     setTodos((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Feature 1: 编辑待办
+  const updateTodo = async (id: string, patch: Record<string, unknown>) => {
+    try {
+      const updated = await invoke<Todo>("todo_update", { id, ...patch });
+      setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    } catch (e) {
+      console.error("todo_update failed", e);
+    }
+  };
+
+  // Feature 2: 清空已完成
+  const clearCompleted = async () => {
+    const removed = await invoke<number>("todo_clear_completed");
+    if (removed > 0) {
+      setTodos((prev) => prev.filter((t) => !t.completed));
+    }
+  };
+
   const triggerTodoDanmaku = (todo: Todo) => {
-    // 统一走 Rust trigger_todo，按 level 自动路由弹幕/特效
     invoke("trigger_todo", { id: todo.id }).catch(console.error);
   };
 
@@ -267,7 +531,6 @@ function App() {
     }
   };
 
-  // 演示面板：直接派发具体特效（不依赖 todo）
   const previewEffect = (e: EffectType) => {
     invoke("trigger_vfx", { effect: e, level, screen: targetScreen }).catch(console.error);
   };
@@ -282,18 +545,49 @@ function App() {
     alert(`成功导入 ${count} 条待办`);
   };
 
+  // Feature 5: 保存偏好
+  const savePrefs = (p: Preferences) => {
+    setPrefs(p);
+    invoke("save_prefs", { prefs: p }).catch(console.error);
+  };
+
+  // 客户端过滤：标签 + 搜索文字 + 已完成
+  const filteredTodos = todos.filter((t) => {
+    if (!showCompleted && t.completed) return false;
+    if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      return false;
+    return true;
+  });
+
   const activeCount = todos.filter((t) => !t.completed).length;
+  const completedCount = todos.filter((t) => t.completed).length;
 
   return (
     <div className="console">
       <header className="console-header">
         <span className="badge">vfx-todo</span>
-        <span className="counter">{activeCount} 待办 · {todos.length} 总计</span>
+        <span className="counter">{activeCount} 待办 · {completedCount} 已完成</span>
         <div className="header-actions">
           <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">⬇️</button>
           <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">⬆️</button>
         </div>
       </header>
+
+      {/* Feature 3: 搜索 */}
+      <div className="search-bar">
+        <input
+          className="search-input"
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="搜索待办..."
+        />
+        {searchQuery && (
+          <button className="search-clear" onClick={() => setSearchQuery("")}>
+            ✕
+          </button>
+        )}
+      </div>
 
       <div className="tag-filter">
         <button
@@ -318,24 +612,49 @@ function App() {
         ))}
       </div>
 
+      {/* Feature 2: 已完成切换 + 清空 */}
+      <div className="view-controls">
+        <label className="show-completed-toggle">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(e) => setShowCompleted(e.target.checked)}
+          />
+          显示已完成
+        </label>
+        {completedCount > 0 && (
+          <button className="clear-completed-btn" onClick={clearCompleted}>
+            清空已完成 ({completedCount})
+          </button>
+        )}
+      </div>
+
       <div className="todo-list">
-        {todos.length === 0 ? (
-          <div className="todo-empty">暂无待办，添加一个试试</div>
+        {filteredTodos.length === 0 ? (
+          <div className="todo-empty">
+            {searchQuery ? "没有匹配的待办" : "暂无待办，添加一个试试"}
+          </div>
         ) : (
-          todos.map((todo) => (
+          filteredTodos.map((todo) => (
             <TodoItem
               key={todo.id}
               todo={todo}
+              screens={screens}
               onComplete={completeTodo}
               onDelete={deleteTodo}
               onTrigger={triggerTodoDanmaku}
+              onUpdate={updateTodo}
             />
           ))
         )}
       </div>
 
       <div className="todo-input">
-        <select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
+        <select value={level} onChange={(e) => {
+          const l = e.target.value as Level;
+          setLevel(l);
+          savePrefs({ ...prefs, default_level: l });
+        }}>
           <option value="low">弹幕</option>
           <option value="mid">粒子</option>
           <option value="high">破碎</option>
@@ -352,7 +671,11 @@ function App() {
             </option>
           ))}
         </select>
-        <select value={targetScreen} onChange={(e) => setTargetScreen(Number(e.target.value))}>
+        <select value={targetScreen} onChange={(e) => {
+          const s = Number(e.target.value);
+          setTargetScreen(s);
+          savePrefs({ ...prefs, default_screen: s });
+        }}>
           {screens.map((s) => (
             <option key={s.id} value={s.id}>
               {s.is_primary ? "主屏" : `屏 ${s.id + 1}`}
