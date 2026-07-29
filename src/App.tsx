@@ -40,6 +40,7 @@ interface ScreenInfo {
 interface Preferences {
   default_screen: number;
   default_level: string;
+  theme?: string;
 }
 
 const LEVEL_LABEL: Record<Level, string> = {
@@ -486,15 +487,32 @@ function App() {
     default_level: "high",
   });
 
+  // 主题：system / dark / light
+  type Theme = "system" | "dark" | "light";
+  const [theme, setTheme] = useState<Theme>("system");
+
   useEffect(() => {
     invoke<Preferences>("load_prefs")
       .then((p) => {
         setPrefs(p);
         setLevel(p.default_level as Level);
         setTargetScreen(p.default_screen);
+        if (p.theme === "dark" || p.theme === "light") {
+          setTheme(p.theme);
+        }
       })
       .catch(() => {}); // 首次启动无文件，正常
   }, []);
+
+  // 同步主题到 <html> data-theme 属性
+  useEffect(() => {
+    const el = document.documentElement;
+    if (theme === "system") {
+      el.removeAttribute("data-theme");
+    } else {
+      el.setAttribute("data-theme", theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     refresh(filterTag || undefined);
@@ -639,6 +657,17 @@ function App() {
         <span className="badge">vfx-todo</span>
         <span className="counter">{activeCount} 待办 · {completedCount} 已完成</span>
         <div className="header-actions">
+          <button
+            className="icon-btn theme-toggle"
+            onClick={() => {
+              const next = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+              setTheme(next);
+              savePrefs({ ...prefs, theme: next });
+            }}
+            title={`主题：${theme === "dark" ? "深色" : theme === "light" ? "亮色" : "跟随系统"}`}
+          >
+            {theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "💻"}
+          </button>
           <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">⬇️</button>
           <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">⬆️</button>
         </div>

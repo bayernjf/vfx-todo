@@ -83,9 +83,15 @@ struct Preferences {
     default_screen: i32,
     #[serde(default = "default_level")]
     default_level: String,
+    /// 主题：system / dark / light
+    #[serde(default = "default_theme")]
+    theme: String,
 }
 fn default_level() -> String {
     "high".to_string()
+}
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 #[derive(Clone)]
@@ -413,6 +419,7 @@ fn load_prefs(app: tauri::AppHandle) -> Result<Preferences, String> {
         Ok(Preferences {
             default_screen: 0,
             default_level: "high".to_string(),
+            theme: "system".to_string(),
         })
     }
 }
@@ -1360,13 +1367,13 @@ mod tests {
     // ---------- 偏好设置 ----------
     #[test]
     fn preferences_default_values() {
-        let prefs = Preferences { default_screen: 0, default_level: "high".into() };
+        let prefs = Preferences { default_screen: 0, default_level: "high".into(), theme: "system".into() };
         assert_eq!(prefs.default_level, "high");
     }
 
     #[test]
     fn preferences_serialization_roundtrip() {
-        let prefs = Preferences { default_screen: 1, default_level: "low".into() };
+        let prefs = Preferences { default_screen: 1, default_level: "low".into(), theme: "dark".into() };
         let json = serde_json::to_string(&prefs).unwrap();
         let parsed: Preferences = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.default_screen, 1);
