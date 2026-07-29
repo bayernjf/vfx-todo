@@ -2,7 +2,7 @@
  * 纯函数 & 常量单元测试
  * 不依赖 DOM / Tauri API，可直接运行
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 // ====== formatDue ======
 // 直接在测试内实现一份，避免通过 React 组件间接测试

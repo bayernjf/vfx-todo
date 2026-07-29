@@ -4,7 +4,6 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import React from "react";
 
 // 直接用内联 TodoItem 实现（避免污染测试的 tauri mock）
 type Level = "low" | "mid" | "high";

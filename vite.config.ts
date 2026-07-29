@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Tauri 期望固定端口 + 严格端口（避免 dev 时端口漂移导致 Rust 端连不上）

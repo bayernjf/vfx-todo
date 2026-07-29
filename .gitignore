@@ -3,6 +3,12 @@ dist
 dist-ssr
 *.local
 
+# TypeScript build artifacts
+*.tsbuildinfo
+# tsc -b 误把 vite.config.ts 编译出来的产物（修好 tsconfig.node.json 后不再生成）
+vite.config.js
+vite.config.d.ts
+
 # Editor
 .vscode/*
 !.vscode/extensions.json
