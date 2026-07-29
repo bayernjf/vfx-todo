@@ -29,6 +29,7 @@ interface Todo {
   recurrence?: string | null;
   effect?: EffectType | null;
   tag?: TagType | null;
+  order?: number;
 }
 
 interface ScreenInfo {
@@ -262,6 +263,12 @@ function TodoItem({
   onUpdate,
   selected,
   onToggleSelect,
+  dragOverId,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  sortBy,
 }: {
   todo: Todo;
   screens: ScreenInfo[];
@@ -271,6 +278,12 @@ function TodoItem({
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
   selected: boolean;
   onToggleSelect: (id: string) => void;
+  dragOverId: string | null;
+  onDragStart: (e: React.DragEvent, id: string) => void;
+  onDragOver: (e: React.DragEvent, id: string) => void;
+  onDrop: (e: React.DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  sortBy: string;
 }) {
   const [, setTick] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -337,8 +350,16 @@ function TodoItem({
 
   return (
     <div
-      className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""} ${selected ? "selected" : ""}`}
+      draggable={sortBy === "order"}
+      className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""} ${selected ? "selected" : ""} ${dragOverId === todo.id ? "drag-over" : ""}`}
+      onDragStart={(e) => onDragStart(e, todo.id)}
+      onDragOver={(e) => onDragOver(e, todo.id)}
+      onDrop={(e) => onDrop(e, todo.id)}
+      onDragEnd={onDragEnd}
     >
+      {sortBy === "order" && (
+        <span className="drag-handle" title="拖拽排序">⋮⋮</span>
+      )}
       <input
         type="checkbox"
         className="todo-checkbox"
@@ -435,7 +456,8 @@ function App() {
   const [showCompleted, setShowCompleted] = useState(true);
 
   // Feature 6: 排序
-  const [sortBy, setSortBy] = useState<"created" | "due" | "level">("created");
+  const [sortBy, setSortBy] = useState<"created" | "due" | "level" | "order">("created");
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   // Feature 8: 批量选中
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -654,6 +676,52 @@ function App() {
     }
   };
 
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverId !== id) setDragOverId(id);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverId(null);
+    const draggedId = e.dataTransfer.getData("text/plain");
+    if (!draggedId || draggedId === targetId) return;
+
+    const currentIds = filteredTodos.map((t) => t.id);
+    const fromIdx = currentIds.indexOf(draggedId);
+    const toIdx = currentIds.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const reordered = [...currentIds];
+    reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, draggedId);
+
+    // Optimistic UI update
+    setTodos((prev) => {
+      const map = new Map(prev.map((t) => [t.id, t]));
+      return reordered
+        .map((id, i) => {
+          const t = map.get(id);
+          if (!t) return null;
+          return { ...t, order: i };
+        })
+        .filter(Boolean) as Todo[];
+    });
+
+    await invoke("todo_reorder", { ids: reordered });
+  };
+
+  const handleDragEnd = () => {
+    setDragOverId(null);
+  };
+
   // Feature 1: 编辑待办
   const updateTodo = async (id: string, patch: Record<string, unknown>) => {
     try {
@@ -733,6 +801,8 @@ function App() {
           const wb = w[b.level] ?? 99;
           return wa - wb || b.created_at - a.created_at;
         }
+        case "order":
+          return (a.order ?? 0) - (b.order ?? 0);
         default: // created
           return b.created_at - a.created_at;
       }
@@ -815,11 +885,12 @@ function App() {
         <select
           className="sort-select"
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as "created" | "due" | "level")}
+          onChange={(e) => setSortBy(e.target.value as "created" | "due" | "level" | "order")}
         >
           <option value="created">按创建时间</option>
           <option value="due">按到期时间</option>
           <option value="level">按等级</option>
+          <option value="order">手动排序</option>
         </select>
         {completedCount > 0 && (
           <button className="clear-completed-btn" onClick={clearCompleted}>
@@ -858,6 +929,12 @@ function App() {
               onUpdate={updateTodo}
               selected={selectedIds.has(todo.id)}
               onToggleSelect={toggleSelect}
+              dragOverId={dragOverId}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+              sortBy={sortBy}
             />
           ))
         )}

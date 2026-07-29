@@ -851,3 +851,31 @@ body.overlay-mode {
 .undo-toast-close:hover {
   color: #fff;
 }
+
+/* ===== Drag & Drop ===== */
+.drag-handle {
+  cursor: grab;
+  color: var(--text-dim-50);
+  font-size: 14px;
+  letter-spacing: -3px;
+  padding: 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.todo-item:hover .drag-handle {
+  opacity: 1;
+}
+.todo-item.drag-over {
+  outline: 2px dashed rgba(96,84,241,0.5);
+  outline-offset: -2px;
+  background: rgba(96,84,241,0.08) !important;
+}
+.todo-item[draggable="true"] {
+  cursor: default;
+}
+.todo-item[draggable="true"] .drag-handle {
+  cursor: grab;
+}

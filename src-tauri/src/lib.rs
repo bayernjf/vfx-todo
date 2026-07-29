@@ -52,6 +52,9 @@ struct Todo {
     /// 标签分组：None=未分类，"工作"/"生活"/"紧急"
     #[serde(default)]
     tag: Option<String>,
+    /// 手动排序顺序，0-based，仅 sortBy=order 时有效
+    #[serde(default)]
+    order: i64,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -248,6 +251,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
             std::thread::sleep(Duration::from_secs(1));
             let now = js_sys_now();
             let mut todos = state.todos.lock().unwrap();
+            let base_count = todos.len();
             let mut changed = false;
 
             let mut new_todos = Vec::new();
@@ -294,6 +298,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                     _ => due,
                                 };
                                 if next_due > due {
+                                    let order = (base_count + new_todos.len()) as i64;
                                     new_todos.push(Todo {
                                         id: gen_id(),
                                         title: todo.title.clone(),
@@ -305,6 +310,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                         recurrence: todo.recurrence.clone(),
                                         effect: todo.effect.clone(),
                                         tag: todo.tag.clone(),
+                                        order,
                                     });
                                 }
                             }
@@ -462,6 +468,7 @@ fn todo_create(
         }
     });
     let mut todos = state.todos.lock().unwrap();
+    let order = todos.len() as i64;
     let todo = Todo {
         id: gen_id(),
         title,
@@ -473,6 +480,7 @@ fn todo_create(
         recurrence,
         effect,
         tag,
+        order,
     };
     todos.push(todo.clone());
     *state.dirty.lock().unwrap() = true;
@@ -577,6 +585,19 @@ fn todo_batch_delete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Res
         *state.dirty.lock().unwrap() = true;
     }
     Ok(removed)
+}
+
+/// 手动排序：按 ids 数组的顺序重新分配 order 字段
+#[tauri::command]
+fn todo_reorder(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    let mut todos = state.todos.lock().unwrap();
+    for (i, id) in ids.iter().enumerate() {
+        if let Some(t) = todos.iter_mut().find(|t| t.id == *id) {
+            t.order = i as i64;
+        }
+    }
+    *state.dirty.lock().unwrap() = true;
+    Ok(())
 }
 
 #[tauri::command]
@@ -804,6 +825,7 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     recurrence: parts.get(7).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
                     effect,
                     tag,
+                    order: result.len() as i64,
                 });
             }
             result
@@ -914,6 +936,7 @@ pub fn run() {
             todo_clear_completed,
             todo_batch_complete,
             todo_batch_delete,
+            todo_reorder,
             load_prefs,
             save_prefs,
             export_todos,
@@ -949,6 +972,7 @@ mod tests {
             recurrence: None,
             effect,
             tag,
+            order: 0,
         }
     }
 
@@ -982,6 +1006,7 @@ mod tests {
             recurrence: None,
             effect: effect.filter(|e| is_vfx_effect(e)),
             tag: tag.filter(|t| is_valid_tag(t)),
+            order: state.todos.lock().unwrap().len() as i64,
         };
         state.todos.lock().unwrap().push(t.clone());
         *state.dirty.lock().unwrap() = true;
