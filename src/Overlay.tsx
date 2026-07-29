@@ -9,6 +9,7 @@ interface DanmakuItem {
   y: number;
   speed: number;
   width: number;
+  lane: number;
 }
 
 interface VfxPayload {
@@ -275,6 +276,63 @@ class VfxEngine {
   }
 }
 
+function playVfxSound(effect: "shatter" | "particle") {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+
+    if (effect === "particle") {
+      // 粒子：中频滑音，能量感
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(900, now + 0.25);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } else {
+      // 破碎：低频冲击 + 高频碎裂 noise
+      const t = now;
+      // 低频冲击
+      const osc1 = ctx.createOscillator();
+      const g1 = ctx.createGain();
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(180, t);
+      osc1.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+      g1.gain.setValueAtTime(0.25, t);
+      g1.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      osc1.connect(g1);
+      g1.connect(ctx.destination);
+      osc1.start(t);
+      osc1.stop(t + 0.25);
+      // 高频碎裂
+      const bufferSize = ctx.sampleRate * 0.3;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+      }
+      const noise = ctx.createBufferSource();
+      const g2 = ctx.createGain();
+      noise.buffer = buffer;
+      g2.gain.setValueAtTime(0.12, t);
+      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      noise.connect(g2);
+      g2.connect(ctx.destination);
+      noise.start(t);
+    }
+
+    // 自动关闭 AudioContext 避免资源泄漏
+    setTimeout(() => ctx.close(), 1000);
+  } catch {
+    // 浏览器禁用音频或 AudioContext 不支持时静默失败
+  }
+}
+
 // ============ Overlay 组件 ============
 
 function Overlay() {
@@ -356,14 +414,38 @@ function Overlay() {
         if (!canvas) return;
         ctx.font = `${fontHeight}px "PingFang SC", system-ui, sans-serif`;
         const width = ctx.measureText(p.text).width;
+
+        const LANE_COUNT = 6;
+        const laneHeight = (canvas.clientHeight * dpr) / LANE_COUNT;
+
+        // 计算每条轨道当前最右侧弹幕的右边界
+        const edges = new Array(LANE_COUNT).fill(-Infinity);
+        for (const it of itemsRef.current) {
+          const right = it.x + it.width;
+          if (right > edges[it.lane]) edges[it.lane] = right;
+        }
+
+        // 分配到最空的轨道（右边界最小）
+        let bestLane = 0;
+        let minEdge = Infinity;
+        for (let i = 0; i < LANE_COUNT; i++) {
+          if (edges[i] < minEdge) {
+            minEdge = edges[i];
+            bestLane = i;
+          }
+        }
+
+        const y = bestLane * laneHeight + (laneHeight - fontHeight) / 2;
+
         itemsRef.current.push({
           id: p.id,
           text: p.text,
           color: p.color,
           x: canvas.clientWidth * dpr,
-          y: Math.random() * (canvas.clientHeight - 40) * dpr,
+          y: Math.max(0, y),
           speed: p.speed,
           width,
+          lane: bestLane,
         });
       });
       unlistenDanmaku = u1;
@@ -371,6 +453,7 @@ function Overlay() {
       const u2 = await listen<VfxPayload>("vfx", (event) => {
         const p = event.payload;
         vfxEngineRef.current?.trigger(p.effect, p.color);
+        playVfxSound(p.effect);
       });
       unlistenVfx = u2;
     })();
