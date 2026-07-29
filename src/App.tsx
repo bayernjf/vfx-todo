@@ -51,6 +51,63 @@ function formatDue(dueAt: number | null): string {
   return `${secs}秒后`;
 }
 
+function TodoItem({
+  todo,
+  onComplete,
+  onDelete,
+  onTrigger,
+}: {
+  todo: Todo;
+  onComplete: (id: string) => void;
+  onDelete: (id: string) => void;
+  onTrigger: (todo: Todo) => void;
+}) {
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!todo.due_at || todo.completed) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [todo.due_at, todo.completed]);
+
+  return (
+    <div
+      className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""}`}
+    >
+      <span
+        className="todo-level"
+        style={{ color: LEVEL_COLOR[todo.level], borderColor: LEVEL_COLOR[todo.level] }}
+      >
+        {LEVEL_LABEL[todo.level]}
+      </span>
+      <div className="todo-content">
+        <span
+          className="todo-title"
+          onClick={() => !todo.completed && onTrigger(todo)}
+        >
+          {todo.title}
+          {todo.recurrence && (
+            <span className="recurrence-badge">
+              {todo.recurrence === "daily" ? "每天" : "每周"}
+            </span>
+          )}
+        </span>
+        {todo.due_at && !todo.completed && (
+          <span className="todo-due">{formatDue(todo.due_at)}</span>
+        )}
+      </div>
+      {!todo.completed && (
+        <button className="todo-btn complete" onClick={() => onComplete(todo.id)}>
+          完成
+        </button>
+      )}
+      <button className="todo-btn delete" onClick={() => onDelete(todo.id)}>
+        删除
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
@@ -59,7 +116,6 @@ function App() {
   const [customDue, setCustomDue] = useState("");
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
-  const [, setTick] = useState(0);
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
   const [targetScreen, setTargetScreen] = useState(0);
   const [recurrence, setRecurrence] = useState<string | null>(null);
@@ -77,11 +133,8 @@ function App() {
       .catch(console.error);
     // 监听调度器触发的刷新事件
     const un = listen("todos-updated", () => refresh());
-    // 每秒重算倒计时显示
-    const timer = setInterval(() => setTick((t) => t + 1), 1000);
     return () => {
       un.then((f) => f());
-      clearInterval(timer);
     };
   }, []);
 
@@ -168,41 +221,13 @@ function App() {
           <div className="todo-empty">暂无待办，添加一个试试</div>
         ) : (
           todos.map((todo) => (
-            <div
+            <TodoItem
               key={todo.id}
-              className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""}`}
-            >
-              <span
-                className="todo-level"
-                style={{ color: LEVEL_COLOR[todo.level], borderColor: LEVEL_COLOR[todo.level] }}
-              >
-                {LEVEL_LABEL[todo.level]}
-              </span>
-              <div className="todo-content">
-                <span
-                  className="todo-title"
-                  onClick={() => !todo.completed && triggerTodoDanmaku(todo)}
-                >
-                  {todo.title}
-                  {todo.recurrence && (
-                    <span className="recurrence-badge">
-                      {todo.recurrence === "daily" ? "每天" : "每周"}
-                    </span>
-                  )}
-                </span>
-                {todo.due_at && !todo.completed && (
-                  <span className="todo-due">{formatDue(todo.due_at)}</span>
-                )}
-              </div>
-              {!todo.completed && (
-                <button className="todo-btn complete" onClick={() => completeTodo(todo.id)}>
-                  完成
-                </button>
-              )}
-              <button className="todo-btn delete" onClick={() => deleteTodo(todo.id)}>
-                删除
-              </button>
-            </div>
+              todo={todo}
+              onComplete={completeTodo}
+              onDelete={deleteTodo}
+              onTrigger={triggerTodoDanmaku}
+            />
           ))
         )}
       </div>
