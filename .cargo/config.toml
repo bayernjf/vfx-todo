@@ -1,0 +1,11 @@
+# 项目级 cargo 镜像配置（国内加速）
+# 如需切换镜像，修改 replace-with 指向的源名即可
+[source.crates-io]
+replace-with = "tuna"
+
+[source.tuna]
+registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
+
+# 让 cargo 用系统 git 拉取 git 依赖，通常比内置 git 库更稳
+[net]
+git-fetch-with-cli = true

@@ -1,0 +1,284 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: "PingFang SC", system-ui, -apple-system, sans-serif;
+}
+
+/* ============ 主控制台窗口 ============ */
+body:not(.overlay-mode) {
+  background: #1a1d24;
+  color: #e5e5e5;
+}
+
+.console {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.badge {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #cfd8ff;
+  background: rgba(96, 84, 241, 0.18);
+  border: 1px solid rgba(96, 84, 241, 0.35);
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.counter {
+  font-size: 12px;
+  color: rgba(229, 229, 229, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============ ToDo 列表 ============ */
+.todo-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.todo-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.todo-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.todo-empty {
+  text-align: center;
+  color: rgba(229, 229, 229, 0.3);
+  font-size: 13px;
+  padding: 32px 0;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.15s;
+}
+
+.todo-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.todo-item.completed {
+  opacity: 0.4;
+}
+
+.todo-item.completed .todo-title {
+  text-decoration: line-through;
+}
+
+.todo-level {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.todo-title {
+  flex: 1;
+  font-size: 14px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-title:hover {
+  color: #cfd8ff;
+}
+
+.todo-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.todo-btn:hover {
+  opacity: 0.85;
+}
+
+.todo-btn.complete {
+  background: rgba(78, 205, 196, 0.2);
+  color: #4ecdc4;
+}
+
+.todo-btn.delete {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
+/* ============ 输入区 ============ */
+.todo-input {
+  display: flex;
+  gap: 8px;
+}
+
+.todo-input select {
+  padding: 8px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e5e5;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+
+.todo-input input,
+.danmaku-bar input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.todo-input input:focus,
+.danmaku-bar input:focus {
+  border-color: #6054f1;
+}
+
+.todo-input input::placeholder,
+.danmaku-bar input::placeholder {
+  color: rgba(229, 229, 229, 0.4);
+}
+
+.todo-input button,
+.danmaku-bar button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #6054f1;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.todo-input button:hover,
+.danmaku-bar button:hover {
+  background: #4b3fe3;
+}
+
+/* ============ 弹幕快速栏 ============ */
+.danmaku-bar {
+  display: flex;
+  gap: 8px;
+}
+
+/* ============ 到期预设 ============ */
+.due-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.due-label {
+  font-size: 12px;
+  color: rgba(229, 229, 229, 0.5);
+}
+
+.due-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(229, 229, 229, 0.7);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.due-btn:hover {
+  border-color: #6054f1;
+  color: #cfd8ff;
+}
+
+.due-btn.active {
+  background: rgba(96, 84, 241, 0.25);
+  border-color: #6054f1;
+  color: #cfd8ff;
+}
+
+.due-hint {
+  font-size: 11px;
+  color: #4ecdc4;
+}
+
+.console-hint {
+  font-size: 11px;
+  color: rgba(229, 229, 229, 0.35);
+  text-align: center;
+}
+
+/* ============ Overlay 窗口 ============ */
+body.overlay-mode {
+  background: transparent !important;
+}
+
+.vfx-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.overlay-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  z-index: 20;
+}
