@@ -11,6 +11,13 @@ interface Todo {
   completed: boolean;
   created_at: number;
   due_at: number | null;
+  screen?: number;
+}
+
+interface ScreenInfo {
+  id: number;
+  name: string;
+  is_primary: boolean;
 }
 
 const LEVEL_LABEL: Record<Level, string> = {
@@ -50,6 +57,8 @@ function App() {
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
   const [, setTick] = useState(0);
+  const [screens, setScreens] = useState<ScreenInfo[]>([]);
+  const [targetScreen, setTargetScreen] = useState(0);
 
   const refresh = () => {
     invoke<Todo[]>("todo_list")
@@ -59,6 +68,9 @@ function App() {
 
   useEffect(() => {
     refresh();
+    invoke<ScreenInfo[]>("list_screens")
+      .then(setScreens)
+      .catch(console.error);
     // 监听调度器触发的刷新事件
     const un = listen("todos-updated", () => refresh());
     // 每秒重算倒计时显示
@@ -78,6 +90,7 @@ function App() {
       title,
       level,
       dueAt,
+      screen: targetScreen,
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
@@ -108,7 +121,7 @@ function App() {
     const color = colors[Math.floor(Math.random() * colors.length)];
     const speed = 120 + Math.random() * 80;
     try {
-      await invoke("send_danmaku", { text, color, speed });
+      await invoke("send_danmaku", { text, color, speed, screen: targetScreen });
       setDanmakuCount((c) => c + 1);
       setDanmakuInput("");
     } catch (e) {
@@ -169,6 +182,13 @@ function App() {
           <option value="low">弹幕</option>
           <option value="mid">粒子</option>
           <option value="high">破碎</option>
+        </select>
+        <select value={targetScreen} onChange={(e) => setTargetScreen(Number(e.target.value))}>
+          {screens.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.is_primary ? "主屏" : `屏 ${s.id + 1}`}
+            </option>
+          ))}
         </select>
         <input
           value={input}
