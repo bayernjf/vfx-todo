@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -440,6 +440,16 @@ function App() {
   // Feature 8: 批量选中
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Undo toast
+  type UndoAction = {
+    type: "complete" | "delete" | "batchComplete" | "batchDelete";
+    label: string;
+    revert: () => Promise<void>;
+  };
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const undoRef = useRef(undoAction);
+  undoRef.current = undoAction;
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -457,21 +467,51 @@ function App() {
 
   const batchComplete = async () => {
     const idsArr = [...selectedIds];
+    const snaps = todos.filter((t) => selectedIds.has(t.id));
     const count = await invoke<number>("todo_batch_complete", { ids: idsArr });
     if (count > 0) {
       setTodos((prev) =>
         prev.map((t) => (selectedIds.has(t.id) ? { ...t, completed: true } : t))
       );
       deselectAll();
+      setUndoAction({
+        type: "batchComplete",
+        label: `已完成 ${count} 条待办`,
+        revert: async () => {
+          for (const s of snaps) {
+            await invoke("todo_update", { id: s.id, completed: false });
+          }
+          refresh(filterTag || undefined);
+        },
+      });
     }
   };
 
   const batchDelete = async () => {
     const idsArr = [...selectedIds];
+    const snaps = todos.filter((t) => selectedIds.has(t.id));
     const count = await invoke<number>("todo_batch_delete", { ids: idsArr });
     if (count > 0) {
       setTodos((prev) => prev.filter((t) => !selectedIds.has(t.id)));
       deselectAll();
+      setUndoAction({
+        type: "batchDelete",
+        label: `已删除 ${count} 条待办`,
+        revert: async () => {
+          for (const s of snaps) {
+            await invoke<Todo>("todo_create", {
+              title: s.title,
+              level: s.level,
+              dueAt: s.due_at,
+              screen: s.screen ?? 0,
+              recurrence: s.recurrence ?? null,
+              effect: s.effect ?? null,
+              tag: s.tag ?? null,
+            });
+          }
+          refresh(filterTag || undefined);
+        },
+      });
     }
   };
 
@@ -514,6 +554,15 @@ function App() {
     }
   }, [theme]);
 
+  // Undo toast auto-dismiss after 3s
+  useEffect(() => {
+    if (!undoAction) return;
+    const timer = setTimeout(() => {
+      if (undoRef.current) setUndoAction(null);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [undoAction]);
+
   useEffect(() => {
     refresh(filterTag || undefined);
     invoke<ScreenInfo[]>("list_screens")
@@ -553,15 +602,56 @@ function App() {
   };
 
   const completeTodo = async (id: string) => {
+    const snap = todos.find((t) => t.id === id);
     await invoke("todo_complete", { id });
     setTodos((prev) =>
       prev.map((t) => (t.id === id ? { ...t, completed: true } : t))
     );
+    if (snap) {
+      setUndoAction({
+        type: "complete",
+        label: `「${snap.title}」已完成`,
+        revert: async () => {
+          await invoke("todo_update", { id, completed: false });
+          refresh(filterTag || undefined);
+        },
+      });
+    }
   };
 
   const deleteTodo = async (id: string) => {
+    const snap = todos.find((t) => t.id === id);
     await invoke("todo_delete", { id });
     setTodos((prev) => prev.filter((t) => t.id !== id));
+    if (snap) {
+      setUndoAction({
+        type: "delete",
+        label: `「${snap.title}」已删除`,
+        revert: async () => {
+          await invoke<Todo>("todo_create", {
+            title: snap.title,
+            level: snap.level,
+            dueAt: snap.due_at,
+            screen: snap.screen ?? 0,
+            recurrence: snap.recurrence ?? null,
+            effect: snap.effect ?? null,
+            tag: snap.tag ?? null,
+          });
+          refresh(filterTag || undefined);
+        },
+      });
+    }
+  };
+
+  const undoLast = async () => {
+    if (!undoAction) return;
+    const action = undoAction;
+    setUndoAction(null);
+    try {
+      await action.revert();
+    } catch (e) {
+      console.error("undo failed", e);
+    }
   };
 
   // Feature 1: 编辑待办
@@ -905,6 +995,15 @@ function App() {
       <div className="console-hint">
         点击待办标题触发 · 到期自动派发 · ⌘⇧4/5/6/7/8 预览新特效 · 已发 {danmakuCount} 条
       </div>
+
+      {/* Undo Toast */}
+      {undoAction && (
+        <div className="undo-toast">
+          <span>{undoAction.label}</span>
+          <button className="undo-toast-btn" onClick={undoLast}>撤销</button>
+          <button className="undo-toast-close" onClick={() => setUndoAction(null)}>✕</button>
+        </div>
+      )}
     </div>
   );
 }

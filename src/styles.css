@@ -803,3 +803,51 @@ body.overlay-mode {
   pointer-events: none;
   z-index: 20;
 }
+
+/* ===== Undo Toast ===== */
+.undo-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: #6054f1;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  z-index: 999;
+  font-size: 14px;
+  animation: toast-slide-up 0.2s ease-out;
+}
+@keyframes toast-slide-up {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.undo-toast-btn {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.undo-toast-btn:hover {
+  background: rgba(255,255,255,0.35);
+}
+.undo-toast-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px;
+  line-height: 1;
+}
+.undo-toast-close:hover {
+  color: #fff;
+}
