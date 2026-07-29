@@ -8,6 +8,7 @@ interface DanmakuItem {
   x: number;
   y: number;
   speed: number;
+  width: number;
 }
 
 interface VfxPayload {
@@ -134,12 +135,13 @@ void main() {
 
 class VfxEngine {
   private gl: WebGLRenderingContext | null = null;
-  private program: WebGLProgram | null = null;
+  private programs = new Map<string, { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }>();
   private buffer: WebGLBuffer | null = null;
   private raf = 0;
   private startTime = 0;
   private duration = 1500; // ms
-  private uniforms: Record<string, WebGLUniformLocation | null> = {};
+  private currentProgram: WebGLProgram | null = null;
+  private currentUniforms: Record<string, WebGLUniformLocation | null> = {};
   private currentColor: string = "#ff6b6b";
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -171,7 +173,14 @@ class VfxEngine {
     return shader;
   }
 
-  private buildProgram(fragSrc: string) {
+  private getOrBuildProgram(fragSrc: string) {
+    const cached = this.programs.get(fragSrc);
+    if (cached) {
+      this.currentProgram = cached.program;
+      this.currentUniforms = cached.uniforms;
+      return;
+    }
+
     const gl = this.gl!;
     const vert = this.compile(gl.VERTEX_SHADER, VERT_SRC)!;
     const frag = this.compile(gl.FRAGMENT_SHADER, fragSrc)!;
@@ -183,8 +192,6 @@ class VfxEngine {
       console.error("program link error:", gl.getProgramInfoLog(program));
       return;
     }
-    if (this.program) gl.deleteProgram(this.program);
-    this.program = program;
 
     // 全屏 quad（两个三角形）
     const verts = new Float32Array([
@@ -198,20 +205,23 @@ class VfxEngine {
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // 缓存 uniform 位置
-    this.uniforms = {
+    const uniforms = {
       u_resolution: gl.getUniformLocation(program, "u_resolution"),
       u_time: gl.getUniformLocation(program, "u_time"),
       u_center: gl.getUniformLocation(program, "u_center"),
       u_color: gl.getUniformLocation(program, "u_color"),
       u_seed: gl.getUniformLocation(program, "u_seed"),
     };
+
+    this.programs.set(fragSrc, { program, uniforms });
+    this.currentProgram = program;
+    this.currentUniforms = uniforms;
   }
 
   trigger(effect: "shatter" | "particle", color: string) {
     if (!this.gl) return;
     this.currentColor = color;
-    this.buildProgram(effect === "shatter" ? SHATTER_FRAG_SRC : PARTICLE_FRAG_SRC);
+    this.getOrBuildProgram(effect === "shatter" ? SHATTER_FRAG_SRC : PARTICLE_FRAG_SRC);
 
     const dpr = window.devicePixelRatio;
     this.canvas.width = this.canvas.clientWidth * dpr;
@@ -232,17 +242,17 @@ class VfxEngine {
 
   private loop = () => {
     const gl = this.gl;
-    if (!gl || !this.program) return;
+    if (!gl || !this.currentProgram) return;
     const elapsed = performance.now() - this.startTime;
     const t = Math.min(elapsed / this.duration, 1);
 
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(this.program);
-    gl.uniform2f(this.uniforms.u_resolution, this.canvas.width, this.canvas.height);
-    gl.uniform1f(this.uniforms.u_time, t);
-    gl.uniform2f(this.uniforms.u_center, 0.5, 0.5);
-    gl.uniform3f(this.uniforms.u_color, ...this.hexToRgb(this.currentColor));
-    gl.uniform1f(this.uniforms.u_seed, Math.random() * 100);
+    gl.useProgram(this.currentProgram);
+    gl.uniform2f(this.currentUniforms.u_resolution, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this.currentUniforms.u_time, t);
+    gl.uniform2f(this.currentUniforms.u_center, 0.5, 0.5);
+    gl.uniform3f(this.currentUniforms.u_color, ...this.hexToRgb(this.currentColor));
+    gl.uniform1f(this.currentUniforms.u_seed, Math.random() * 100);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     if (t < 1) {
@@ -256,7 +266,10 @@ class VfxEngine {
   destroy() {
     cancelAnimationFrame(this.raf);
     if (this.gl) {
-      if (this.program) this.gl.deleteProgram(this.program);
+      for (const { program } of this.programs.values()) {
+        this.gl.deleteProgram(program);
+      }
+      this.programs.clear();
       if (this.buffer) this.gl.deleteBuffer(this.buffer);
     }
   }
@@ -297,31 +310,31 @@ function Overlay() {
 
     let raf = 0;
     let last = performance.now();
+    const fontHeight = 24 * dpr;
+    ctx.font = `${fontHeight}px "PingFang SC", system-ui, sans-serif`;
+    ctx.textBaseline = "top";
 
     const loop = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       ctx.clearRect(0, 0, danmakuCanvas.width, danmakuCanvas.height);
 
-      const fontHeight = 24 * dpr;
-      ctx.font = `${fontHeight}px "PingFang SC", system-ui, sans-serif`;
-      ctx.textBaseline = "top";
-
       const items = itemsRef.current;
-      for (let i = items.length - 1; i >= 0; i--) {
-        const it = items[i];
-        it.x -= it.speed * dt * dpr;
-        const w = ctx.measureText(it.text).width;
-        if (it.x + w < 0) {
-          items.splice(i, 1);
-          continue;
-        }
-        ctx.fillStyle = it.color;
+      if (items.length > 0) {
         ctx.shadowColor = "rgba(0,0,0,0.7)";
         ctx.shadowBlur = 4 * dpr;
-        ctx.fillText(it.text, it.x, it.y);
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          it.x -= it.speed * dt * dpr;
+          if (it.x + it.width < 0) {
+            items.splice(i, 1);
+            continue;
+          }
+          ctx.fillStyle = it.color;
+          ctx.fillText(it.text, it.x, it.y);
+        }
+        ctx.shadowBlur = 0;
       }
-      ctx.shadowBlur = 0;
 
       raf = requestAnimationFrame(loop);
     };
@@ -341,6 +354,8 @@ function Overlay() {
         const p = event.payload;
         const canvas = danmakuCanvasRef.current;
         if (!canvas) return;
+        ctx.font = `${fontHeight}px "PingFang SC", system-ui, sans-serif`;
+        const width = ctx.measureText(p.text).width;
         itemsRef.current.push({
           id: p.id,
           text: p.text,
@@ -348,13 +363,13 @@ function Overlay() {
           x: canvas.clientWidth * dpr,
           y: Math.random() * (canvas.clientHeight - 40) * dpr,
           speed: p.speed,
+          width,
         });
       });
       unlistenDanmaku = u1;
 
       const u2 = await listen<VfxPayload>("vfx", (event) => {
         const p = event.payload;
-        console.log("[vfx] received", p.effect, p.text);
         vfxEngineRef.current?.trigger(p.effect, p.color);
       });
       unlistenVfx = u2;
