@@ -259,6 +259,8 @@ function TodoItem({
   onDelete,
   onTrigger,
   onUpdate,
+  selected,
+  onToggleSelect,
 }: {
   todo: Todo;
   screens: ScreenInfo[];
@@ -266,6 +268,8 @@ function TodoItem({
   onDelete: (id: string) => void;
   onTrigger: (todo: Todo) => void;
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
 }) {
   const [, setTick] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -332,8 +336,15 @@ function TodoItem({
 
   return (
     <div
-      className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""}`}
+      className={`todo-item ${todo.completed ? "completed" : ""} ${todo.due_at && !todo.completed ? "has-due" : ""} ${selected ? "selected" : ""}`}
     >
+      <input
+        type="checkbox"
+        className="todo-checkbox"
+        checked={selected}
+        onChange={() => onToggleSelect(todo.id)}
+        onClick={(e) => e.stopPropagation()}
+      />
       <span
         className="todo-level"
         style={{ color: LEVEL_COLOR[todo.level], borderColor: LEVEL_COLOR[todo.level] }}
@@ -421,6 +432,47 @@ function App() {
 
   // Feature 2: 显示已完成
   const [showCompleted, setShowCompleted] = useState(true);
+
+  // Feature 6: 排序
+  const [sortBy, setSortBy] = useState<"created" | "due" | "level">("created");
+
+  // Feature 8: 批量选中
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    const activeIds = filteredTodos.filter((t) => !t.completed).map((t) => t.id);
+    setSelectedIds(new Set(activeIds));
+  };
+
+  const deselectAll = () => setSelectedIds(new Set());
+
+  const batchComplete = async () => {
+    const idsArr = [...selectedIds];
+    const count = await invoke<number>("todo_batch_complete", { ids: idsArr });
+    if (count > 0) {
+      setTodos((prev) =>
+        prev.map((t) => (selectedIds.has(t.id) ? { ...t, completed: true } : t))
+      );
+      deselectAll();
+    }
+  };
+
+  const batchDelete = async () => {
+    const idsArr = [...selectedIds];
+    const count = await invoke<number>("todo_batch_delete", { ids: idsArr });
+    if (count > 0) {
+      setTodos((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+      deselectAll();
+    }
+  };
 
   const refresh = (tag?: string) => {
     invoke<Todo[]>("todo_list", { tag: tag || null })
@@ -552,12 +604,31 @@ function App() {
   };
 
   // 客户端过滤：标签 + 搜索文字 + 已完成
-  const filteredTodos = todos.filter((t) => {
-    if (!showCompleted && t.completed) return false;
-    if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()))
-      return false;
-    return true;
-  });
+  const filteredTodos = todos
+    .filter((t) => {
+      if (!showCompleted && t.completed) return false;
+      if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase()))
+        return false;
+      return true;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "due":
+          // 未完成的按 due_at 升序（越近越前），无 due 的排最后
+          if (!a.due_at && !b.due_at) return b.created_at - a.created_at;
+          if (!a.due_at) return 1;
+          if (!b.due_at) return -1;
+          return a.due_at - b.due_at;
+        case "level": {
+          const w = { high: 0, mid: 1, low: 2 };
+          const wa = w[a.level] ?? 99;
+          const wb = w[b.level] ?? 99;
+          return wa - wb || b.created_at - a.created_at;
+        }
+        default: // created
+          return b.created_at - a.created_at;
+      }
+    });
 
   const activeCount = todos.filter((t) => !t.completed).length;
   const completedCount = todos.filter((t) => t.completed).length;
@@ -612,7 +683,7 @@ function App() {
         ))}
       </div>
 
-      {/* Feature 2: 已完成切换 + 清空 */}
+      {/* Feature 2: 已完成切换 + 清空 + Feature 6: 排序 + Feature 8: 批量 */}
       <div className="view-controls">
         <label className="show-completed-toggle">
           <input
@@ -622,12 +693,34 @@ function App() {
           />
           显示已完成
         </label>
+        <select
+          className="sort-select"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as "created" | "due" | "level")}
+        >
+          <option value="created">按创建时间</option>
+          <option value="due">按到期时间</option>
+          <option value="level">按等级</option>
+        </select>
         {completedCount > 0 && (
           <button className="clear-completed-btn" onClick={clearCompleted}>
             清空已完成 ({completedCount})
           </button>
         )}
       </div>
+
+      {/* Feature 8: 批量操作栏 */}
+      {selectedIds.size > 0 && (
+        <div className="batch-bar">
+          <span className="batch-info">已选 {selectedIds.size} 条</span>
+          <div className="batch-actions">
+            <button className="batch-btn select-all" onClick={selectAll}>全选未完成</button>
+            <button className="batch-btn deselect" onClick={deselectAll}>取消全选</button>
+            <button className="batch-btn complete" onClick={batchComplete}>批量完成</button>
+            <button className="batch-btn delete" onClick={batchDelete}>批量删除</button>
+          </div>
+        </div>
+      )}
 
       <div className="todo-list">
         {filteredTodos.length === 0 ? (
@@ -644,6 +737,8 @@ function App() {
               onDelete={deleteTodo}
               onTrigger={triggerTodoDanmaku}
               onUpdate={updateTodo}
+              selected={selectedIds.has(todo.id)}
+              onToggleSelect={toggleSelect}
             />
           ))
         )}

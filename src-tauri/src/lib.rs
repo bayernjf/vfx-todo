@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -91,6 +92,8 @@ fn default_level() -> String {
 struct AppState {
     todos: std::sync::Arc<std::sync::Mutex<Vec<Todo>>>,
     dirty: std::sync::Arc<std::sync::Mutex<bool>>,
+    /// 到期前 1 分钟已提醒过的 todo id（避免重复通知）
+    warned_ids: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -98,6 +101,7 @@ impl AppState {
         Self {
             todos: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             dirty: std::sync::Arc::new(std::sync::Mutex::new(false)),
+            warned_ids: std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())),
         }
     }
 }
@@ -245,6 +249,19 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                 // 未完成 + 有到期时间 + 已到期 → 按 level 触发 + 标记完成
                 if !todo.completed {
                     if let Some(due) = todo.due_at {
+                        // 到期前 1 分钟预热通知（每 session 每个 todo 只发一次）
+                        if due > now && due - now <= 60_000 {
+                            let mut warned = state.warned_ids.lock().unwrap();
+                            if !warned.contains(&todo.id) {
+                                let _ = app
+                                    .notification()
+                                    .builder()
+                                    .title("VFX Todo")
+                                    .body(&format!("即将到期 (1 分钟): {}", todo.title))
+                                    .show();
+                                warned.insert(todo.id.clone());
+                            }
+                        }
                         if due <= now {
                             dispatch_by_level(
                                 &app,
@@ -518,6 +535,36 @@ fn todo_clear_completed(state: tauri::State<'_, AppState>) -> Result<usize, Stri
     let mut todos = state.todos.lock().unwrap();
     let before = todos.len();
     todos.retain(|t| !t.completed);
+    let removed = before - todos.len();
+    if removed > 0 {
+        *state.dirty.lock().unwrap() = true;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+fn todo_batch_complete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    let mut todos = state.todos.lock().unwrap();
+    let mut count = 0usize;
+    for id in &ids {
+        if let Some(t) = todos.iter_mut().find(|t| t.id == *id) {
+            if !t.completed {
+                t.completed = true;
+                count += 1;
+            }
+        }
+    }
+    if count > 0 {
+        *state.dirty.lock().unwrap() = true;
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+fn todo_batch_delete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    let mut todos = state.todos.lock().unwrap();
+    let before = todos.len();
+    todos.retain(|t| !ids.contains(&t.id));
     let removed = before - todos.len();
     if removed > 0 {
         *state.dirty.lock().unwrap() = true;
@@ -858,6 +905,8 @@ pub fn run() {
             todo_update,
             todo_delete,
             todo_clear_completed,
+            todo_batch_complete,
+            todo_batch_delete,
             load_prefs,
             save_prefs,
             export_todos,
