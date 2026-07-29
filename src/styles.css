@@ -261,6 +261,20 @@ body.overlay-mode {
   background: transparent !important;
 }
 
+.overlay-debug {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  padding: 6px 12px;
+  background: rgba(255, 0, 0, 0.6);
+  color: #fff;
+  font-size: 14px;
+  font-family: monospace;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
 .vfx-canvas {
   position: absolute;
   top: 0;
