@@ -8,6 +8,22 @@ use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 // ============ 数据模型 ============
 
+/// 支持的 VFX 特效（与前端 SHADER_MAP 保持一致）。
+/// 这里集中校验，避免拼写错误的 effect 字符串溜到 payload 里。
+const VFX_EFFECTS: &[&str] = &[
+    "shatter",
+    "particle",
+    "rain",
+    "firework",
+    "ripple",
+    "laser",
+    "glitch",
+];
+
+fn is_vfx_effect(effect: &str) -> bool {
+    VFX_EFFECTS.contains(&effect)
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Todo {
     id: String,
@@ -20,6 +36,10 @@ struct Todo {
     screen: i32, // 目标屏幕 index，0 = 主屏
     #[serde(default)]
     recurrence: Option<String>, // "daily" | "weekly"
+    /// 指定具体特效（如 "rain"），None 时按 level 默认派发
+    /// 仅 VFX 特效（VFX_EFFECTS 列表中）允许出现；danmaku 不通过 effect 字段表达
+    #[serde(default)]
+    effect: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -33,7 +53,7 @@ struct DanmakuPayload {
 #[derive(Clone, serde::Serialize)]
 struct VfxPayload {
     id: f64,
-    effect: String, // "shatter" | "particle"
+    effect: String, // "shatter" | "particle" | "rain" | "firework" | "ripple" | "laser" | "glitch"
     text: String,
     color: String,
 }
@@ -137,32 +157,54 @@ fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, level: &str, screen: i32
     }
 }
 
+/// 直接向指定屏幕派发具体 VFX 特效
+fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, level: &str, screen: i32) {
+    if !is_vfx_effect(effect) {
+        log::warn!("dispatch_vfx: unknown effect={}, ignored", effect);
+        return;
+    }
+    let payload = VfxPayload {
+        id: js_sys_now() as f64,
+        effect: effect.to_string(),
+        text: text.to_string(),
+        color: level_to_color(level).to_string(),
+    };
+    log::info!(
+        "dispatch vfx: effect={} text={} screen={} level={}",
+        effect, text, screen, level
+    );
+    let label = format!("overlay-{}", screen);
+    // 必须用 emit_to 精确指定目标窗口，避免广播到所有 overlay
+    if app.get_webview_window(&label).is_some() {
+        let _ = app.emit_to(&label, "vfx", payload);
+    } else {
+        log::warn!("overlay-{} not found, fallback to overlay-0", screen);
+        if app.get_webview_window("overlay-0").is_some() {
+            let _ = app.emit_to("overlay-0", "vfx", payload);
+        }
+    }
+}
+
 /// 按 level 路由：low → 弹幕事件，mid → 粒子特效，high → 破碎特效
-fn dispatch_by_level(app: &tauri::AppHandle, text: &str, level: &str, screen: i32) {
+/// 如果指定了 `effect_override` 且为合法 VFX 特效，则优先使用具体特效（覆盖 level 默认）
+fn dispatch_by_level(
+    app: &tauri::AppHandle,
+    text: &str,
+    level: &str,
+    screen: i32,
+    effect_override: Option<&str>,
+) {
+    // 优先使用具体特效（仅 VFX 特效生效，danmaku 走 level 默认）
+    if let Some(effect) = effect_override {
+        if is_vfx_effect(effect) {
+            dispatch_vfx(app, text, effect, level, screen);
+            return;
+        }
+    }
     match level {
-        "mid" | "high" => {
-            let effect = if level == "high" { "shatter" } else { "particle" };
-            let payload = VfxPayload {
-                id: js_sys_now() as f64,
-                effect: effect.to_string(),
-                text: text.to_string(),
-                color: level_to_color(level).to_string(),
-            };
-            log::info!("dispatch vfx: effect={} text={} screen={}", effect, text, screen);
-            let label = format!("overlay-{}", screen);
-            // 必须用 emit_to 精确指定目标窗口，避免广播到所有 overlay
-            if app.get_webview_window(&label).is_some() {
-                let _ = app.emit_to(&label, "vfx", payload);
-            } else {
-                log::warn!("overlay-{} not found, fallback to overlay-0", screen);
-                if app.get_webview_window("overlay-0").is_some() {
-                    let _ = app.emit_to("overlay-0", "vfx", payload);
-                }
-            }
-        }
-        _ => {
-            dispatch_danmaku(app, text, level, screen);
-        }
+        "mid" => dispatch_vfx(app, text, "particle", level, screen),
+        "high" => dispatch_vfx(app, text, "shatter", level, screen),
+        _ => dispatch_danmaku(app, text, level, screen),
     }
 }
 
@@ -182,7 +224,13 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                 if !todo.completed {
                     if let Some(due) = todo.due_at {
                         if due <= now {
-                            dispatch_by_level(&app, &todo.title, &todo.level, todo.screen);
+                            dispatch_by_level(
+                                &app,
+                                &todo.title,
+                                &todo.level,
+                                todo.screen,
+                                todo.effect.as_deref(),
+                            );
                             todo.completed = true;
                             changed = true;
 
@@ -203,6 +251,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                         due_at: Some(next_due),
                                         screen: todo.screen,
                                         recurrence: todo.recurrence.clone(),
+                                        effect: todo.effect.clone(),
                                     });
                                 }
                             }
@@ -301,7 +350,17 @@ fn todo_create(
     due_at: Option<i64>,
     screen: Option<i32>,
     recurrence: Option<String>,
+    effect: Option<String>,
 ) -> Result<Todo, String> {
+    // 仅接受 VFX_EFFECTS 内的值；非法/None 一律存 None（按 level 默认派发）
+    let effect = effect.and_then(|e| {
+        if is_vfx_effect(&e) {
+            Some(e)
+        } else {
+            log::warn!("todo_create: invalid effect={}, ignored", e);
+            None
+        }
+    });
     let mut todos = state.todos.lock().unwrap();
     let todo = Todo {
         id: gen_id(),
@@ -312,6 +371,7 @@ fn todo_create(
         due_at,
         screen: screen.unwrap_or(0),
         recurrence,
+        effect,
     };
     todos.push(todo.clone());
     *state.dirty.lock().unwrap() = true;
@@ -346,7 +406,31 @@ fn trigger_todo(app: tauri::AppHandle, state: tauri::State<'_, AppState>, id: St
         .iter()
         .find(|t| t.id == id)
         .ok_or("todo not found")?;
-    dispatch_by_level(&app, &todo.title, &todo.level, todo.screen);
+    dispatch_by_level(
+        &app,
+        &todo.title,
+        &todo.level,
+        todo.screen,
+        todo.effect.as_deref(),
+    );
+    Ok(())
+}
+
+/// 直接派发一个具体特效（演示面板 / 实时预览用，不依赖 todo）
+#[tauri::command]
+fn trigger_vfx(
+    app: tauri::AppHandle,
+    effect: String,
+    level: Option<String>,
+    screen: Option<i32>,
+) -> Result<(), String> {
+    if !is_vfx_effect(&effect) {
+        return Err(format!("unknown effect: {effect}"));
+    }
+    let level = level.unwrap_or_else(|| "mid".to_string());
+    let screen = screen.unwrap_or(0);
+    let text = format!("Preview {}", effect);
+    dispatch_vfx(&app, &text, &effect, &level, screen);
     Ok(())
 }
 
@@ -477,10 +561,10 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
     let content = match format.as_str() {
         "json" => serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?,
         "csv" => {
-            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence\n");
+            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence,effect\n");
             for t in todos {
                 csv.push_str(&format!(
-                    "{},{},{},{},{},{},{},{}\n",
+                    "{},{},{},{},{},{},{},{},{}\n",
                     t.id,
                     t.title.replace(",", "\\,"),
                     t.level,
@@ -488,7 +572,8 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     t.created_at,
                     t.due_at.map(|v| v.to_string()).unwrap_or_default(),
                     t.screen,
-                    t.recurrence.unwrap_or_default()
+                    t.recurrence.unwrap_or_default(),
+                    t.effect.unwrap_or_default()
                 ));
             }
             csv
@@ -518,6 +603,11 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                 if i == 0 { continue; }
                 let parts: Vec<&str> = line.split(',').collect();
                 if parts.len() < 7 { continue; }
+                // 第 9 列是 effect，旧文件可能没有 → 取不到时存 None
+                let effect = parts
+                    .get(8)
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                    .and_then(|e| if is_vfx_effect(&e) { Some(e) } else { None });
                 result.push(Todo {
                     id: parts[0].to_string(),
                     title: parts[1].replace("\\,", ","),
@@ -527,6 +617,7 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     due_at: parts[5].parse().ok(),
                     screen: parts[6].parse().unwrap_or(0),
                     recurrence: parts.get(7).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+                    effect,
                 });
             }
             result
@@ -543,12 +634,18 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
 fn register_global_shortcuts(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+    // 顺序决定 shortcut.id（0-based），与下方 match 分支一一对应
     let shortcuts = [
-        "Cmd+Shift+D",
-        "Cmd+Shift+C",
-        "Cmd+Shift+1",
-        "Cmd+Shift+2",
-        "Cmd+Shift+3",
+        "Cmd+Shift+D", // 0: 弹幕 "🔥"
+        "Cmd+Shift+C", // 1: 完成第一个待办
+        "Cmd+Shift+1", // 2: level=low 默认派发（弹幕）
+        "Cmd+Shift+2", // 3: level=mid 默认派发（粒子）
+        "Cmd+Shift+3", // 4: level=high 默认派发（破碎）
+        "Cmd+Shift+4", // 5: rain
+        "Cmd+Shift+5", // 6: firework
+        "Cmd+Shift+6", // 7: ripple
+        "Cmd+Shift+7", // 8: laser
+        "Cmd+Shift+8", // 9: glitch
     ];
     for s in shortcuts {
         let shortcut: Shortcut = s.parse().map_err(|e| format!("{e}"))?;
@@ -576,9 +673,14 @@ pub fn run() {
                             let _ = app.emit_to("main", "todos-updated", ());
                         }
                     }
-                    2 => dispatch_by_level(app, "Quick Low", "low", 0),
-                    3 => dispatch_by_level(app, "Quick Mid", "mid", 0),
-                    4 => dispatch_by_level(app, "Quick High", "high", 0),
+                    2 => dispatch_by_level(app, "Quick Low", "low", 0, None),
+                    3 => dispatch_by_level(app, "Quick Mid", "mid", 0, None),
+                    4 => dispatch_by_level(app, "Quick High", "high", 0, None),
+                    5 => dispatch_vfx(app, "Quick Rain", "rain", "mid", 0),
+                    6 => dispatch_vfx(app, "Quick Firework", "firework", "mid", 0),
+                    7 => dispatch_vfx(app, "Quick Ripple", "ripple", "mid", 0),
+                    8 => dispatch_vfx(app, "Quick Laser", "laser", "mid", 0),
+                    9 => dispatch_vfx(app, "Quick Glitch", "glitch", "mid", 0),
                     _ => {}
                 }
             }
@@ -615,6 +717,7 @@ pub fn run() {
             set_cursor_passthrough,
             send_danmaku,
             trigger_todo,
+            trigger_vfx,
             list_screens,
             todo_list,
             todo_create,

@@ -5,6 +5,16 @@ import { listen } from "@tauri-apps/api/event";
 
 type Level = "low" | "mid" | "high";
 
+// 与后端 VFX_EFFECTS 保持一致
+type EffectType =
+  | "shatter"
+  | "particle"
+  | "rain"
+  | "firework"
+  | "ripple"
+  | "laser"
+  | "glitch";
+
 interface Todo {
   id: string;
   title: string;
@@ -14,6 +24,7 @@ interface Todo {
   due_at: number | null;
   screen?: number;
   recurrence?: string | null;
+  effect?: EffectType | null;
 }
 
 interface ScreenInfo {
@@ -32,6 +43,26 @@ const LEVEL_COLOR: Record<Level, string> = {
   low: "#4ecdc4",
   mid: "#ffe66d",
   high: "#ff6b6b",
+};
+
+const EFFECT_LABEL: Record<EffectType, string> = {
+  shatter: "破碎",
+  particle: "粒子",
+  rain: "雨",
+  firework: "烟花",
+  ripple: "水波",
+  laser: "激光",
+  glitch: "故障",
+};
+
+const EFFECT_COLOR: Record<EffectType, string> = {
+  shatter: "#ff6b6b",
+  particle: "#ffe66d",
+  rain: "#88c0ff",
+  firework: "#ff9f1c",
+  ripple: "#4ecdc4",
+  laser: "#ff006e",
+  glitch: "#c77dff",
 };
 
 const DUE_PRESETS: { label: string; mins: number }[] = [
@@ -91,6 +122,18 @@ function TodoItem({
               {todo.recurrence === "daily" ? "每天" : "每周"}
             </span>
           )}
+          {todo.effect && (
+            <span
+              className="effect-badge"
+              style={{
+                color: EFFECT_COLOR[todo.effect],
+                borderColor: EFFECT_COLOR[todo.effect],
+              }}
+              title={`特效：${EFFECT_LABEL[todo.effect]}`}
+            >
+              {EFFECT_LABEL[todo.effect]}
+            </span>
+          )}
         </span>
         {todo.due_at && !todo.completed && (
           <span className="todo-due">{formatDue(todo.due_at)}</span>
@@ -119,6 +162,8 @@ function App() {
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
   const [targetScreen, setTargetScreen] = useState(0);
   const [recurrence, setRecurrence] = useState<string | null>(null);
+  // 选具体特效时覆盖 level 默认派发；空字符串 = 按 level 默认
+  const [effect, setEffect] = useState<EffectType | "">("");
 
   const refresh = () => {
     invoke<Todo[]>("todo_list")
@@ -153,12 +198,14 @@ function App() {
       dueAt,
       screen: targetScreen,
       recurrence,
+      effect: effect || null,
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
     setDueInMin(null);
     setCustomDue("");
     setRecurrence(null);
+    setEffect("");
   };
 
   const completeTodo = async (id: string) => {
@@ -191,6 +238,11 @@ function App() {
     } catch (e) {
       console.error("send_danmaku failed", e);
     }
+  };
+
+  // 演示面板：直接派发具体特效（不依赖 todo）
+  const previewEffect = (e: EffectType) => {
+    invoke("trigger_vfx", { effect: e, level, screen: targetScreen }).catch(console.error);
   };
 
   const handleExport = async (format: "json" | "csv") => {
@@ -237,6 +289,18 @@ function App() {
           <option value="low">弹幕</option>
           <option value="mid">粒子</option>
           <option value="high">破碎</option>
+        </select>
+        <select
+          value={effect}
+          onChange={(e) => setEffect(e.target.value as EffectType | "")}
+          title="选择具体特效（覆盖 level 默认派发）"
+        >
+          <option value="">默认（按 level）</option>
+          {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
+            <option key={k} value={k}>
+              {EFFECT_LABEL[k]}
+            </option>
+          ))}
         </select>
         <select value={targetScreen} onChange={(e) => setTargetScreen(Number(e.target.value))}>
           {screens.map((s) => (
@@ -302,6 +366,24 @@ function App() {
         ))}
       </div>
 
+      <div className="effect-panel">
+        <span className="due-label">特效演示：</span>
+        {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
+          <button
+            key={k}
+            className="effect-demo-btn"
+            style={{ borderColor: EFFECT_COLOR[k], color: EFFECT_COLOR[k] }}
+            onClick={() => previewEffect(k)}
+            title={`预览 ${EFFECT_LABEL[k]} 特效`}
+          >
+            {EFFECT_LABEL[k]}
+          </button>
+        ))}
+        <span className="effect-panel-hint">
+          点击按钮可即时预览 · 快捷键 ⌘⇧4/5/6/7/8
+        </span>
+      </div>
+
       <div className="danmaku-bar">
         <input
           value={danmakuInput}
@@ -312,7 +394,7 @@ function App() {
         <button onClick={sendDanmaku}>发送</button>
       </div>
       <div className="console-hint">
-        点击待办标题触发弹幕 · 到期自动弹幕 · 已发 {danmakuCount} 条
+        点击待办标题触发 · 到期自动派发 · ⌘⇧4/5/6/7/8 预览新特效 · 已发 {danmakuCount} 条
       </div>
     </div>
   );

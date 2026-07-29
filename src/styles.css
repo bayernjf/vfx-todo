@@ -287,6 +287,46 @@ body:not(.overlay-mode) {
   margin-left: 6px;
 }
 
+.effect-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid currentColor;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.effect-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.effect-demo-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid currentColor;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.effect-demo-btn:hover {
+  background: currentColor;
+  color: #1a1d24 !important;
+}
+
+.effect-panel-hint {
+  font-size: 11px;
+  color: rgba(229, 229, 229, 0.4);
+  margin-left: 8px;
+}
+
 .header-actions {
   display: flex;
   gap: 6px;

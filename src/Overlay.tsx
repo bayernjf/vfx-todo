@@ -12,9 +12,19 @@ interface DanmakuItem {
   lane: number;
 }
 
+// 支持的特效类型（与后端 Rust VfxPayload.effect 保持一致）
+export type EffectType =
+  | "shatter"
+  | "particle"
+  | "rain"
+  | "firework"
+  | "ripple"
+  | "laser"
+  | "glitch";
+
 interface VfxPayload {
   id: number;
-  effect: "shatter" | "particle";
+  effect: EffectType;
   text: string;
   color: string;
 }
@@ -134,6 +144,131 @@ void main() {
 }
 `;
 
+// 雨滴特效
+const RAIN_FRAG_SRC = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_color;
+uniform float u_seed;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  float rain = 0.0;
+  for (float i = 1.0; i <= 5.0; i++) {
+    float speed = 0.5 + i * 0.15;
+    float x = hash(vec2(i, u_seed)) + sin(u_time * 0.3 + i) * 0.1;
+    float y = fract(uv.x * (8.0 + i * 3.0) + x + u_time * speed);
+    float drop = smoothstep(0.02, 0.0, abs(uv.y - y)) * smoothstep(0.3, 0.0, length(uv - vec2(x, y)));
+    rain += drop;
+  }
+  gl_FragColor = vec4(u_color * (0.5 + rain * 2.0), rain * 0.6 + 0.05);
+}
+`;
+
+// 烟花特效
+const FIREWORK_FRAG_SRC = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_color;
+uniform float u_seed;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy - 0.5;
+  uv.x *= u_resolution.x / u_resolution.y;
+  float t = u_time;
+  float burst = 0.0;
+  for (float i = 0.0; i < 40.0; i++) {
+    float angle = i * 0.314 + hash(vec2(i, u_seed)) * 0.5;
+    float speed = 0.3 + hash(vec2(i + 1.0, u_seed)) * 0.4;
+    float r = t * speed;
+    vec2 pos = vec2(cos(angle), sin(angle)) * r;
+    float d = length(uv - pos);
+    float size = 0.015 * (1.0 - t);
+    burst += smoothstep(size, 0.0, d) * (1.0 - t);
+  }
+  float glow = exp(-length(uv) * 3.0) * (1.0 - t) * 0.5;
+  vec3 col = u_color * burst + vec3(1.0, 0.9, 0.6) * glow;
+  gl_FragColor = vec4(col, max(burst, glow));
+}
+`;
+
+// 水波纹特效
+const RIPPLE_FRAG_SRC = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_color;
+uniform float u_seed;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 center = 0.5 + vec2(sin(u_seed) * 0.2, cos(u_seed * 1.3) * 0.2);
+  float dist = length(uv - center);
+  float rings = sin(dist * 40.0 - u_time * 6.0) * 0.5 + 0.5;
+  rings *= exp(-dist * 3.0) * (1.0 - u_time * 0.3);
+  float alpha = rings * 0.5 * (1.0 - u_time);
+  gl_FragColor = vec4(u_color * (0.3 + rings), alpha);
+}
+`;
+
+// 激光扫描特效
+const LASER_FRAG_SRC = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_color;
+uniform float u_seed;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  float angle = u_time * 3.14159 * 2.0 + u_seed;
+  vec2 dir = vec2(cos(angle), sin(angle));
+  float dist = abs(dot(uv - 0.5, vec2(-dir.y, dir.x)));
+  float beam = smoothstep(0.05, 0.0, dist) * (1.0 - u_time * 0.5);
+  float flash = hash(vec2(floor(u_time * 20.0), u_seed)) * smoothstep(0.02, 0.0, dist) * 0.5;
+  gl_FragColor = vec4(u_color * (beam + flash), beam * 0.8 + flash);
+}
+`;
+
+// 故障特效
+const GLITCH_FRAG_SRC = `
+precision mediump float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 u_color;
+uniform float u_seed;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  float t = u_time;
+  float glitch = 0.0;
+  for (float i = 0.0; i < 8.0; i++) {
+    float y = hash(vec2(i, u_seed)) * 0.8 + 0.1;
+    float h = 0.01 + hash(vec2(i + 10.0, u_seed)) * 0.03;
+    float shift = (hash(vec2(i + 20.0, u_seed + floor(t * 10.0))) - 0.5) * 0.1 * (1.0 - t);
+    float line = smoothstep(h, 0.0, abs(uv.y - y));
+    glitch += line;
+    if (abs(uv.y - y) < h) {
+      uv.x += shift;
+    }
+  }
+  float noise = hash(uv * 100.0 + floor(t * 30.0));
+  vec3 col = mix(u_color, vec3(noise), 0.3) * (1.0 + glitch * 2.0);
+  gl_FragColor = vec4(col, (glitch + noise * 0.2) * (1.0 - t));
+}
+`;
+
+const SHADER_MAP: Record<string, string> = {
+  shatter: SHATTER_FRAG_SRC,
+  particle: PARTICLE_FRAG_SRC,
+  rain: RAIN_FRAG_SRC,
+  firework: FIREWORK_FRAG_SRC,
+  ripple: RIPPLE_FRAG_SRC,
+  laser: LASER_FRAG_SRC,
+  glitch: GLITCH_FRAG_SRC,
+};
+
 class VfxEngine {
   private gl: WebGLRenderingContext | null = null;
   private programs = new Map<string, { program: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }>();
@@ -219,10 +354,15 @@ class VfxEngine {
     this.currentUniforms = uniforms;
   }
 
-  trigger(effect: "shatter" | "particle", color: string) {
+  trigger(effect: EffectType, color: string) {
     if (!this.gl) return;
+    const fragSrc = SHADER_MAP[effect];
+    if (!fragSrc) {
+      console.warn("VfxEngine: unknown effect", effect);
+      return;
+    }
     this.currentColor = color;
-    this.getOrBuildProgram(effect === "shatter" ? SHATTER_FRAG_SRC : PARTICLE_FRAG_SRC);
+    this.getOrBuildProgram(fragSrc);
 
     const dpr = window.devicePixelRatio;
     this.canvas.width = this.canvas.clientWidth * dpr;
@@ -276,58 +416,168 @@ class VfxEngine {
   }
 }
 
-function playVfxSound(effect: "shatter" | "particle") {
+function playVfxSound(effect: EffectType) {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     const now = ctx.currentTime;
 
-    if (effect === "particle") {
-      // 粒子：中频滑音，能量感
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(400, now);
-      osc.frequency.exponentialRampToValueAtTime(900, now + 0.25);
-      gain.gain.setValueAtTime(0.15, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.35);
-    } else {
-      // 破碎：低频冲击 + 高频碎裂 noise
-      const t = now;
-      // 低频冲击
-      const osc1 = ctx.createOscillator();
-      const g1 = ctx.createGain();
-      osc1.type = "sine";
-      osc1.frequency.setValueAtTime(180, t);
-      osc1.frequency.exponentialRampToValueAtTime(60, t + 0.15);
-      g1.gain.setValueAtTime(0.25, t);
-      g1.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-      osc1.connect(g1);
-      g1.connect(ctx.destination);
-      osc1.start(t);
-      osc1.stop(t + 0.25);
-      // 高频碎裂
-      const bufferSize = ctx.sampleRate * 0.3;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+    switch (effect) {
+      case "particle": {
+        // 粒子：中频滑音，能量感
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(900, now + 0.25);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+        break;
       }
-      const noise = ctx.createBufferSource();
-      const g2 = ctx.createGain();
-      noise.buffer = buffer;
-      g2.gain.setValueAtTime(0.12, t);
-      g2.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-      noise.connect(g2);
-      g2.connect(ctx.destination);
-      noise.start(t);
+      case "shatter": {
+        // 破碎：低频冲击 + 高频碎裂 noise
+        const t = now;
+        const osc1 = ctx.createOscillator();
+        const g1 = ctx.createGain();
+        osc1.type = "sine";
+        osc1.frequency.setValueAtTime(180, t);
+        osc1.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+        g1.gain.setValueAtTime(0.25, t);
+        g1.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc1.connect(g1);
+        g1.connect(ctx.destination);
+        osc1.start(t);
+        osc1.stop(t + 0.25);
+        const bufferSize = ctx.sampleRate * 0.3;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+        }
+        const noise = ctx.createBufferSource();
+        const g2 = ctx.createGain();
+        noise.buffer = buffer;
+        g2.gain.setValueAtTime(0.12, t);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+        noise.connect(g2);
+        g2.connect(ctx.destination);
+        noise.start(t);
+        break;
+      }
+      case "rain": {
+        // 雨：连续高频白噪声（模拟细密雨点）
+        const bufferSize = ctx.sampleRate * 0.8;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          // 用较高频率振荡 × 噪声塑造"滴落感"
+          data[i] = (Math.random() * 2 - 1) * (0.4 + 0.6 * Math.sin(i * 0.02));
+        }
+        const noise = ctx.createBufferSource();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
+        filter.type = "highpass";
+        filter.frequency.value = 2000;
+        noise.buffer = buffer;
+        gain.gain.setValueAtTime(0.0, now);
+        gain.gain.linearRampToValueAtTime(0.18, now + 0.1);
+        gain.gain.linearRampToValueAtTime(0.0, now + 0.8);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        noise.start(now);
+        break;
+      }
+      case "firework": {
+        // 烟花：先上行嗡鸣 → 炸开时高频泛音 + 噪声
+        // 上行
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(600, now + 0.35);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+        // 炸开
+        const t = now + 0.4;
+        const bufferSize = ctx.sampleRate * 0.4;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+        }
+        const noise = ctx.createBufferSource();
+        const g2 = ctx.createGain();
+        noise.buffer = buffer;
+        g2.gain.setValueAtTime(0.2, t);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+        noise.connect(g2);
+        g2.connect(ctx.destination);
+        noise.start(t);
+        break;
+      }
+      case "ripple": {
+        // 水波纹：低频正弦缓慢起伏
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(80, now + 0.6);
+        gain.gain.setValueAtTime(0.0, now);
+        gain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+        gain.gain.linearRampToValueAtTime(0.0, now + 0.7);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.7);
+        break;
+      }
+      case "laser": {
+        // 激光：高频锯齿 + 短促扫描
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(1200, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.15);
+        gain.gain.setValueAtTime(0.0, now);
+        gain.gain.linearRampToValueAtTime(0.12, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+        break;
+      }
+      case "glitch": {
+        // 故障：短促锯齿噪音 × 3 次错位爆裂
+        for (let k = 0; k < 3; k++) {
+          const t = now + k * 0.08;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(150 + k * 70, t);
+          osc.frequency.exponentialRampToValueAtTime(50, t + 0.05);
+          gain.gain.setValueAtTime(0.0, t);
+          gain.gain.linearRampToValueAtTime(0.1, t + 0.005);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.07);
+        }
+        break;
+      }
     }
 
     // 自动关闭 AudioContext 避免资源泄漏
-    setTimeout(() => ctx.close(), 1000);
+    setTimeout(() => ctx.close(), 1500);
   } catch {
     // 浏览器禁用音频或 AudioContext 不支持时静默失败
   }
