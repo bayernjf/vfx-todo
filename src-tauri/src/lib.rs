@@ -463,6 +463,83 @@ fn hide_dock_icon(_app: &tauri::AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn hide_dock_icon(_app: &tauri::AppHandle) {}
 
+#[tauri::command]
+async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, format: String) -> Result<(), String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog()
+        .file()
+        .add_filter(format.to_uppercase(), &[&format])
+        .set_file_name(&format!("vfx-todos.{format}"))
+        .blocking_save_file();
+    let path = path.ok_or("cancelled")?;
+
+    let todos = state.todos.lock().unwrap().clone();
+    let content = match format.as_str() {
+        "json" => serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?,
+        "csv" => {
+            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence\n");
+            for t in todos {
+                csv.push_str(&format!(
+                    "{},{},{},{},{},{},{},{}\n",
+                    t.id,
+                    t.title.replace(",", "\\,"),
+                    t.level,
+                    t.completed,
+                    t.created_at,
+                    t.due_at.map(|v| v.to_string()).unwrap_or_default(),
+                    t.screen,
+                    t.recurrence.unwrap_or_default()
+                ));
+            }
+            csv
+        }
+        _ => return Err("unsupported format".to_string()),
+    };
+
+    std::fs::write(path.as_path().unwrap(), content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, format: String) -> Result<usize, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog()
+        .file()
+        .add_filter(format.to_uppercase(), &[&format])
+        .blocking_pick_file();
+    let path = path.ok_or("cancelled")?;
+
+    let data = std::fs::read_to_string(path.as_path().unwrap()).map_err(|e| e.to_string())?;
+    let imported: Vec<Todo> = match format.as_str() {
+        "json" => serde_json::from_str(&data).map_err(|e| e.to_string())?,
+        "csv" => {
+            let mut result = Vec::new();
+            for (i, line) in data.lines().enumerate() {
+                if i == 0 { continue; }
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() < 7 { continue; }
+                result.push(Todo {
+                    id: parts[0].to_string(),
+                    title: parts[1].replace("\\,", ","),
+                    level: parts[2].to_string(),
+                    completed: parts[3].parse().unwrap_or(false),
+                    created_at: parts[4].parse().unwrap_or(0),
+                    due_at: parts[5].parse().ok(),
+                    screen: parts[6].parse().unwrap_or(0),
+                    recurrence: parts.get(7).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+                });
+            }
+            result
+        }
+        _ => return Err("unsupported format".to_string()),
+    };
+    let count = imported.len();
+    let mut todos = state.todos.lock().unwrap();
+    todos.extend(imported);
+    *state.dirty.lock().unwrap() = true;
+    Ok(count)
+}
+
 fn register_global_shortcuts(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -483,6 +560,7 @@ fn register_global_shortcuts(app: &tauri::AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 match shortcut.id {
@@ -541,7 +619,9 @@ pub fn run() {
             todo_list,
             todo_create,
             todo_complete,
-            todo_delete
+            todo_delete,
+            export_todos,
+            import_todos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

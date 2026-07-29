@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+
 type Level = "low" | "mid" | "high";
 
 interface Todo {
@@ -139,6 +140,16 @@ function App() {
     }
   };
 
+  const handleExport = async (format: "json" | "csv") => {
+    await invoke("export_todos", { format });
+  };
+
+  const handleImport = async (format: "json" | "csv") => {
+    const count = await invoke<number>("import_todos", { format });
+    refresh();
+    alert(`成功导入 ${count} 条待办`);
+  };
+
   const activeCount = todos.filter((t) => !t.completed).length;
 
   return (
@@ -146,6 +157,10 @@ function App() {
       <header className="console-header">
         <span className="badge">vfx-todo</span>
         <span className="counter">{activeCount} 待办 · {todos.length} 总计</span>
+        <div className="header-actions">
+          <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">⬇️</button>
+          <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">⬆️</button>
+        </div>
       </header>
 
       <div className="todo-list">

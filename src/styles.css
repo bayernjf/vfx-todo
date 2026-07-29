@@ -287,6 +287,27 @@ body:not(.overlay-mode) {
   margin-left: 6px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.icon-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.icon-btn:hover {
+  background: rgba(96, 84, 241, 0.2);
+  border-color: rgba(96, 84, 241, 0.5);
+}
+
 .console-hint {
   font-size: 11px;
   color: rgba(229, 229, 229, 0.35);
