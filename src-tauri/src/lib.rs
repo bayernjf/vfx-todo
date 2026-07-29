@@ -13,6 +13,8 @@ struct Todo {
     completed: bool,
     created_at: i64,
     due_at: Option<i64>,
+    #[serde(default)]
+    screen: i32, // 目标屏幕 index，0 = 主屏
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -29,6 +31,13 @@ struct VfxPayload {
     effect: String, // "shatter" | "particle"
     text: String,
     color: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ScreenInfo {
+    id: i32,
+    name: String,
+    is_primary: bool,
 }
 
 // ============ 存储 ============
@@ -91,22 +100,25 @@ fn level_to_speed(level: &str) -> f64 {
     }
 }
 
-fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, level: &str) {
+fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, level: &str, screen: i32) {
     let payload = DanmakuPayload {
         id: js_sys_now() as f64,
         text: text.to_string(),
         color: level_to_color(level).to_string(),
         speed: level_to_speed(level),
     };
-    for (label, window) in app.webview_windows() {
-        if label.starts_with("overlay-") {
-            let _ = window.emit("danmaku", payload.clone());
-        }
+    let label = format!("overlay-{}", screen);
+    // 注意：Tauri v2 中 WebviewWindow::emit 会广播给所有窗口
+    // 必须用 emit_to 精确指定目标窗口，否则三块屏会同时出现特效
+    if app.get_webview_window(&label).is_some() {
+        let _ = app.emit_to(&label, "danmaku", payload);
+    } else {
+        log::warn!("overlay-{} not found, danmaku dropped", screen);
     }
 }
 
 /// 按 level 路由：low → 弹幕事件，mid → 粒子特效，high → 破碎特效
-fn dispatch_by_level(app: &tauri::AppHandle, text: &str, level: &str) {
+fn dispatch_by_level(app: &tauri::AppHandle, text: &str, level: &str, screen: i32) {
     match level {
         "mid" | "high" => {
             let effect = if level == "high" { "shatter" } else { "particle" };
@@ -116,15 +128,20 @@ fn dispatch_by_level(app: &tauri::AppHandle, text: &str, level: &str) {
                 text: text.to_string(),
                 color: level_to_color(level).to_string(),
             };
-            log::info!("dispatch vfx: effect={} text={}", effect, text);
-            for (label, window) in app.webview_windows() {
-                if label.starts_with("overlay-") {
-                    let _ = window.emit("vfx", payload.clone());
+            log::info!("dispatch vfx: effect={} text={} screen={}", effect, text, screen);
+            let label = format!("overlay-{}", screen);
+            // 必须用 emit_to 精确指定目标窗口，避免广播到所有 overlay
+            if app.get_webview_window(&label).is_some() {
+                let _ = app.emit_to(&label, "vfx", payload);
+            } else {
+                log::warn!("overlay-{} not found, fallback to overlay-0", screen);
+                if app.get_webview_window("overlay-0").is_some() {
+                    let _ = app.emit_to("overlay-0", "vfx", payload);
                 }
             }
         }
         _ => {
-            dispatch_danmaku(app, text, level);
+            dispatch_danmaku(app, text, level, screen);
         }
     }
 }
@@ -144,7 +161,7 @@ fn start_scheduler(app: tauri::AppHandle) {
                 if !todo.completed {
                     if let Some(due) = todo.due_at {
                         if due <= now {
-                            dispatch_by_level(&app, &todo.title, &todo.level);
+                            dispatch_by_level(&app, &todo.title, &todo.level, todo.screen);
                             todo.completed = true;
                             changed = true;
                         }
@@ -156,8 +173,9 @@ fn start_scheduler(app: tauri::AppHandle) {
                 if let Err(e) = save_todos(&app, &todos) {
                     log::warn!("scheduler save failed: {e}");
                 }
-                if let Some(main) = app.get_webview_window("main") {
-                    let _ = main.emit("todos-updated", ());
+                // 用 emit_to 只通知主窗口，避免广播到 overlay
+                if app.get_webview_window("main").is_some() {
+                    let _ = app.emit_to("main", "todos-updated", ());
                 }
             }
         }
@@ -220,6 +238,7 @@ fn todo_create(
     title: String,
     level: String,
     due_at: Option<i64>,
+    screen: Option<i32>,
 ) -> Result<Todo, String> {
     let mut todos = load_todos(&app);
     let todo = Todo {
@@ -229,6 +248,7 @@ fn todo_create(
         completed: false,
         created_at: js_sys_now(),
         due_at,
+        screen: screen.unwrap_or(0),
     };
     todos.push(todo.clone());
     save_todos(&app, &todos)?;
@@ -261,22 +281,51 @@ fn trigger_todo(app: tauri::AppHandle, id: String) -> Result<(), String> {
         .iter()
         .find(|t| t.id == id)
         .ok_or("todo not found")?;
-    dispatch_by_level(&app, &todo.title, &todo.level);
+    dispatch_by_level(&app, &todo.title, &todo.level, todo.screen);
     Ok(())
 }
 
+/// 返回所有屏幕列表，供前端选择目标屏幕
 #[tauri::command]
-fn send_danmaku(app: tauri::AppHandle, text: String, color: String, speed: f64) -> Result<(), String> {
+fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
+    let primary = app.primary_monitor().map_err(|e| e.to_string())?;
+    let mut all_monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    if let Some(p) = &primary {
+        if !all_monitors.iter().any(|m| m.name() == p.name()) {
+            all_monitors.insert(0, p.clone());
+        }
+    }
+    let primary_name: Option<&str> = primary.as_ref().and_then(|m| m.name()).map(|s| s.as_str());
+    let screens = all_monitors
+        .iter()
+        .enumerate()
+        .map(|(idx, m)| ScreenInfo {
+            id: idx as i32,
+            name: m
+                .name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("Screen {}", idx)),
+            is_primary: m.name().map(|s| s.as_str()) == primary_name,
+        })
+        .collect();
+    Ok(screens)
+}
+
+#[tauri::command]
+fn send_danmaku(app: tauri::AppHandle, text: String, color: String, speed: f64, screen: Option<i32>) -> Result<(), String> {
     let payload = DanmakuPayload {
         id: js_sys_now() as f64,
         text,
         color,
         speed,
     };
-    for (label, window) in app.webview_windows() {
-        if label.starts_with("overlay-") {
-            let _ = window.emit("danmaku", payload.clone());
-        }
+    let target = screen.unwrap_or(0);
+    let label = format!("overlay-{}", target);
+    // 用 emit_to 精确发给指定 overlay，避免广播到所有屏幕
+    if app.get_webview_window(&label).is_some() {
+        let _ = app.emit_to(&label, "danmaku", payload);
+    } else {
+        log::warn!("overlay-{} not found, danmaku dropped", target);
     }
     Ok(())
 }
@@ -311,6 +360,7 @@ pub fn run() {
             set_cursor_passthrough,
             send_danmaku,
             trigger_todo,
+            list_screens,
             todo_list,
             todo_create,
             todo_complete,
