@@ -40,6 +40,21 @@ struct ScreenInfo {
     is_primary: bool,
 }
 
+#[derive(Clone)]
+struct AppState {
+    todos: std::sync::Arc<std::sync::Mutex<Vec<Todo>>>,
+    dirty: std::sync::Arc<std::sync::Mutex<bool>>,
+}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            todos: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            dirty: std::sync::Arc::new(std::sync::Mutex::new(false)),
+        }
+    }
+}
+
 // ============ 存储 ============
 
 fn storage_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -148,12 +163,12 @@ fn dispatch_by_level(app: &tauri::AppHandle, text: &str, level: &str, screen: i3
 
 // ============ 调度引擎：后台轮询到期 ToDo ============
 
-fn start_scheduler(app: tauri::AppHandle) {
+fn start_scheduler(app: tauri::AppHandle, state: AppState) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(1));
             let now = js_sys_now();
-            let mut todos = load_todos(&app);
+            let mut todos = state.todos.lock().unwrap();
             let mut changed = false;
 
             for todo in todos.iter_mut() {
@@ -170,12 +185,27 @@ fn start_scheduler(app: tauri::AppHandle) {
             }
 
             if changed {
-                if let Err(e) = save_todos(&app, &todos) {
-                    log::warn!("scheduler save failed: {e}");
-                }
+                *state.dirty.lock().unwrap() = true;
                 // 用 emit_to 只通知主窗口，避免广播到 overlay
                 if app.get_webview_window("main").is_some() {
                     let _ = app.emit_to("main", "todos-updated", ());
+                }
+            }
+        }
+    });
+}
+
+fn start_persist_thread(app: tauri::AppHandle, state: AppState) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(5));
+            let dirty = *state.dirty.lock().unwrap();
+            if dirty {
+                let todos = state.todos.lock().unwrap().clone();
+                if let Err(e) = save_todos(&app, &todos) {
+                    log::warn!("persist failed: {e}");
+                } else {
+                    *state.dirty.lock().unwrap() = false;
                 }
             }
         }
@@ -228,19 +258,19 @@ fn spawn_overlay_windows(app: &tauri::AppHandle) -> Result<(), String> {
 // ============ Tauri 命令 ============
 
 #[tauri::command]
-fn todo_list(app: tauri::AppHandle) -> Result<Vec<Todo>, String> {
-    Ok(load_todos(&app))
+fn todo_list(state: tauri::State<'_, AppState>) -> Result<Vec<Todo>, String> {
+    Ok(state.todos.lock().unwrap().clone())
 }
 
 #[tauri::command]
 fn todo_create(
-    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
     title: String,
     level: String,
     due_at: Option<i64>,
     screen: Option<i32>,
 ) -> Result<Todo, String> {
-    let mut todos = load_todos(&app);
+    let mut todos = state.todos.lock().unwrap();
     let todo = Todo {
         id: gen_id(),
         title,
@@ -251,32 +281,34 @@ fn todo_create(
         screen: screen.unwrap_or(0),
     };
     todos.push(todo.clone());
-    save_todos(&app, &todos)?;
+    *state.dirty.lock().unwrap() = true;
     Ok(todo)
 }
 
 #[tauri::command]
-fn todo_complete(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut todos = load_todos(&app);
+fn todo_complete(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut todos = state.todos.lock().unwrap();
     for t in todos.iter_mut() {
         if t.id == id {
             t.completed = true;
             break;
         }
     }
-    save_todos(&app, &todos)
+    *state.dirty.lock().unwrap() = true;
+    Ok(())
 }
 
 #[tauri::command]
-fn todo_delete(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let mut todos = load_todos(&app);
+fn todo_delete(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut todos = state.todos.lock().unwrap();
     todos.retain(|t| t.id != id);
-    save_todos(&app, &todos)
+    *state.dirty.lock().unwrap() = true;
+    Ok(())
 }
 
 #[tauri::command]
-fn trigger_todo(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let todos = load_todos(&app);
+fn trigger_todo(app: tauri::AppHandle, state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let todos = state.todos.lock().unwrap();
     let todo = todos
         .iter()
         .find(|t| t.id == id)
@@ -350,10 +382,17 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            let state = AppState::new();
+            {
+                let disk_todos = load_todos(app.handle());
+                *state.todos.lock().unwrap() = disk_todos;
+            }
+            app.manage(state.clone());
             if let Err(e) = spawn_overlay_windows(app.handle()) {
                 log::warn!("spawn overlay windows failed: {e}");
             }
-            start_scheduler(app.handle().clone());
+            start_scheduler(app.handle().clone(), state.clone());
+            start_persist_thread(app.handle().clone(), state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
