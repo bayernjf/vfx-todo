@@ -327,6 +327,45 @@ body:not(.overlay-mode) {
   margin-left: 8px;
 }
 
+/* 标签筛选与角标 */
+.tag-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #fff;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.tag-filter {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.tag-filter-pill {
+  font-size: 12px;
+  padding: 2px 12px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: rgba(229, 229, 229, 0.5);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.tag-filter-pill:hover {
+  color: rgba(229, 229, 229, 0.85);
+}
+
+.tag-filter-pill.active {
+  color: #fff;
+  font-weight: 600;
+}
+
 .header-actions {
   display: flex;
   gap: 6px;

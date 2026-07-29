@@ -8,6 +8,13 @@ use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
 // ============ 数据模型 ============
 
+/// 预设标签（与前端一致）
+const PREDEFINED_TAGS: &[&str] = &["工作", "生活", "紧急"];
+
+fn is_valid_tag(tag: &str) -> bool {
+    PREDEFINED_TAGS.contains(&tag)
+}
+
 /// 支持的 VFX 特效（与前端 SHADER_MAP 保持一致）。
 /// 这里集中校验，避免拼写错误的 effect 字符串溜到 payload 里。
 const VFX_EFFECTS: &[&str] = &[
@@ -40,6 +47,9 @@ struct Todo {
     /// 仅 VFX 特效（VFX_EFFECTS 列表中）允许出现；danmaku 不通过 effect 字段表达
     #[serde(default)]
     effect: Option<String>,
+    /// 标签分组：None=未分类，"工作"/"生活"/"紧急"
+    #[serde(default)]
+    tag: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -252,6 +262,7 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                         screen: todo.screen,
                                         recurrence: todo.recurrence.clone(),
                                         effect: todo.effect.clone(),
+                                        tag: todo.tag.clone(),
                                     });
                                 }
                             }
@@ -338,8 +349,21 @@ fn spawn_overlay_windows(app: &tauri::AppHandle) -> Result<(), String> {
 // ============ Tauri 命令 ============
 
 #[tauri::command]
-fn todo_list(state: tauri::State<'_, AppState>) -> Result<Vec<Todo>, String> {
-    Ok(state.todos.lock().unwrap().clone())
+fn todo_list(state: tauri::State<'_, AppState>, tag: Option<String>) -> Result<Vec<Todo>, String> {
+    let todos = state.todos.lock().unwrap().clone();
+    match tag {
+        Some(ref t) if !t.is_empty() => Ok(todos
+            .into_iter()
+            .filter(|todo| todo.tag.as_deref() == Some(t.as_str()))
+            .collect()),
+        _ => Ok(todos),
+    }
+}
+
+/// 返回可用的预设标签列表（前端用）
+#[tauri::command]
+fn tag_list() -> Vec<&'static str> {
+    PREDEFINED_TAGS.to_vec()
 }
 
 #[tauri::command]
@@ -351,6 +375,7 @@ fn todo_create(
     screen: Option<i32>,
     recurrence: Option<String>,
     effect: Option<String>,
+    tag: Option<String>,
 ) -> Result<Todo, String> {
     // 仅接受 VFX_EFFECTS 内的值；非法/None 一律存 None（按 level 默认派发）
     let effect = effect.and_then(|e| {
@@ -358,6 +383,14 @@ fn todo_create(
             Some(e)
         } else {
             log::warn!("todo_create: invalid effect={}, ignored", e);
+            None
+        }
+    });
+    let tag = tag.and_then(|t| {
+        if is_valid_tag(&t) {
+            Some(t)
+        } else {
+            log::warn!("todo_create: invalid tag={}, ignored", t);
             None
         }
     });
@@ -372,6 +405,7 @@ fn todo_create(
         screen: screen.unwrap_or(0),
         recurrence,
         effect,
+        tag,
     };
     todos.push(todo.clone());
     *state.dirty.lock().unwrap() = true;
@@ -561,10 +595,10 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
     let content = match format.as_str() {
         "json" => serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?,
         "csv" => {
-            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence,effect\n");
+            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence,effect,tag\n");
             for t in todos {
                 csv.push_str(&format!(
-                    "{},{},{},{},{},{},{},{},{}\n",
+                    "{},{},{},{},{},{},{},{},{},{}\n",
                     t.id,
                     t.title.replace(",", "\\,"),
                     t.level,
@@ -573,7 +607,8 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     t.due_at.map(|v| v.to_string()).unwrap_or_default(),
                     t.screen,
                     t.recurrence.unwrap_or_default(),
-                    t.effect.unwrap_or_default()
+                    t.effect.unwrap_or_default(),
+                    t.tag.unwrap_or_default()
                 ));
             }
             csv
@@ -603,11 +638,15 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                 if i == 0 { continue; }
                 let parts: Vec<&str> = line.split(',').collect();
                 if parts.len() < 7 { continue; }
-                // 第 9 列是 effect，旧文件可能没有 → 取不到时存 None
+                // 第 9 列是 effect，第 10 列是 tag（旧文件可能没有 → 取不到时存 None）
                 let effect = parts
                     .get(8)
                     .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
                     .and_then(|e| if is_vfx_effect(&e) { Some(e) } else { None });
+                let tag = parts
+                    .get(9)
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                    .and_then(|t| if is_valid_tag(&t) { Some(t) } else { None });
                 result.push(Todo {
                     id: parts[0].to_string(),
                     title: parts[1].replace("\\,", ","),
@@ -618,6 +657,7 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     screen: parts[6].parse().unwrap_or(0),
                     recurrence: parts.get(7).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
                     effect,
+                    tag,
                 });
             }
             result
@@ -725,6 +765,7 @@ pub fn run() {
             todo_delete,
             export_todos,
             import_todos,
+            tag_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

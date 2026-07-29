@@ -15,6 +15,9 @@ type EffectType =
   | "laser"
   | "glitch";
 
+// 与后端 PREDEFINED_TAGS 保持一致
+type TagType = "工作" | "生活" | "紧急";
+
 interface Todo {
   id: string;
   title: string;
@@ -25,6 +28,7 @@ interface Todo {
   screen?: number;
   recurrence?: string | null;
   effect?: EffectType | null;
+  tag?: TagType | null;
 }
 
 interface ScreenInfo {
@@ -63,6 +67,14 @@ const EFFECT_COLOR: Record<EffectType, string> = {
   ripple: "#4ecdc4",
   laser: "#ff006e",
   glitch: "#c77dff",
+};
+
+const TAGS: TagType[] = ["工作", "生活", "紧急"];
+
+const TAG_COLOR: Record<TagType, string> = {
+  工作: "#ff6b6b",
+  生活: "#4ecdc4",
+  紧急: "#f9ca24",
 };
 
 const DUE_PRESETS: { label: string; mins: number }[] = [
@@ -134,6 +146,16 @@ function TodoItem({
               {EFFECT_LABEL[todo.effect]}
             </span>
           )}
+          {todo.tag && (
+            <span
+              className="tag-badge"
+              style={{
+                backgroundColor: TAG_COLOR[todo.tag],
+              }}
+            >
+              {todo.tag}
+            </span>
+          )}
         </span>
         {todo.due_at && !todo.completed && (
           <span className="todo-due">{formatDue(todo.due_at)}</span>
@@ -164,24 +186,27 @@ function App() {
   const [recurrence, setRecurrence] = useState<string | null>(null);
   // 选具体特效时覆盖 level 默认派发；空字符串 = 按 level 默认
   const [effect, setEffect] = useState<EffectType | "">("");
+  // 标签筛选：空 = 全部，否则只看该标签的待办
+  const [filterTag, setFilterTag] = useState<TagType | "">("");
+  // 新建待办时选的标签
+  const [newTag, setNewTag] = useState<TagType | "">("");
 
-  const refresh = () => {
-    invoke<Todo[]>("todo_list")
+  const refresh = (tag?: string) => {
+    invoke<Todo[]>("todo_list", { tag: tag || null })
       .then(setTodos)
       .catch(console.error);
   };
 
   useEffect(() => {
-    refresh();
+    refresh(filterTag || undefined);
     invoke<ScreenInfo[]>("list_screens")
       .then(setScreens)
       .catch(console.error);
-    // 监听调度器触发的刷新事件
-    const un = listen("todos-updated", () => refresh());
+    const un = listen("todos-updated", () => refresh(filterTag || undefined));
     return () => {
       un.then((f) => f());
     };
-  }, []);
+  }, [filterTag]);
 
   const addTodo = async () => {
     const title = input.trim();
@@ -199,6 +224,7 @@ function App() {
       screen: targetScreen,
       recurrence,
       effect: effect || null,
+      tag: newTag || null,
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
@@ -206,6 +232,7 @@ function App() {
     setCustomDue("");
     setRecurrence(null);
     setEffect("");
+    setNewTag("");
   };
 
   const completeTodo = async (id: string) => {
@@ -268,6 +295,29 @@ function App() {
         </div>
       </header>
 
+      <div className="tag-filter">
+        <button
+          className={`tag-filter-pill ${filterTag === "" ? "active" : ""}`}
+          onClick={() => setFilterTag("")}
+        >
+          全部
+        </button>
+        {TAGS.map((t) => (
+          <button
+            key={t}
+            className={`tag-filter-pill ${filterTag === t ? "active" : ""}`}
+            style={{
+              borderColor: TAG_COLOR[t],
+              color: filterTag === t ? "#fff" : TAG_COLOR[t],
+              backgroundColor: filterTag === t ? TAG_COLOR[t] : "transparent",
+            }}
+            onClick={() => setFilterTag(filterTag === t ? "" : t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
       <div className="todo-list">
         {todos.length === 0 ? (
           <div className="todo-empty">暂无待办，添加一个试试</div>
@@ -306,6 +356,18 @@ function App() {
           {screens.map((s) => (
             <option key={s.id} value={s.id}>
               {s.is_primary ? "主屏" : `屏 ${s.id + 1}`}
+            </option>
+          ))}
+        </select>
+        <select
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value as TagType | "")}
+          title="待办分组标签"
+        >
+          <option value="">无标签</option>
+          {TAGS.map((t) => (
+            <option key={t} value={t}>
+              {t}
             </option>
           ))}
         </select>
