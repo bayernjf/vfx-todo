@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 interface DanmakuItem {
@@ -269,20 +269,28 @@ function Overlay() {
   const vfxCanvasRef = useRef<HTMLCanvasElement>(null);
   const itemsRef = useRef<DanmakuItem[]>([]);
   const vfxEngineRef = useRef<VfxEngine | null>(null);
+  const [, setDebugInfo] = useState("init");
 
   useEffect(() => {
     document.body.classList.add("overlay-mode");
 
     // 弹幕 Canvas 2D 引擎
     const danmakuCanvas = danmakuCanvasRef.current;
-    if (!danmakuCanvas) return;
+    if (!danmakuCanvas) {
+      setDebugInfo("ERROR: danmakuCanvas ref is null");
+      return;
+    }
     const ctx = danmakuCanvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      setDebugInfo("ERROR: 2d context null");
+      return;
+    }
 
     const dpr = window.devicePixelRatio;
     const resize = () => {
       danmakuCanvas.width = danmakuCanvas.clientWidth * dpr;
       danmakuCanvas.height = danmakuCanvas.clientHeight * dpr;
+      setDebugInfo(`canvas=${danmakuCanvas.width}x${danmakuCanvas.height} dpr=${dpr}`);
     };
     resize();
     window.addEventListener("resize", resize);
