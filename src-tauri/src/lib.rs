@@ -2,6 +2,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{Emitter, Manager, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+
+
 
 // ============ 数据模型 ============
 
@@ -371,9 +374,107 @@ fn set_cursor_passthrough(window: tauri::WebviewWindow, ignore: bool) -> Result<
 
 // ============ 启动 ============
 
+fn setup_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::menu::{Menu, MenuItem};
+
+    let show_i = MenuItem::with_id(app, "show", "Show", true, None::<&str>).map_err(|e| e.to_string())?;
+    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>).map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(app, &[&show_i, &quit_i]).map_err(|e| e.to_string())?;
+
+    TrayIconBuilder::new()
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                let app = tray.app_handle();
+                if let Some(win) = app.get_webview_window("main") {
+                    if win.is_visible().unwrap_or(true) {
+                        let _ = win.hide();
+                    } else {
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                }
+            }
+        })
+        .on_menu_event(|app, event| {
+            match event.id.as_ref() {
+                "show" => {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
+            }
+        })
+        .build(app)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn hide_dock_icon(_app: &tauri::AppHandle) {
+    use objc2::runtime::AnyObject;
+    use objc2::{msg_send, class};
+    unsafe {
+        let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        // NSApplicationActivationPolicyAccessory = 1
+        let _: () = msg_send![ns_app, setActivationPolicy: 1i64];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_dock_icon(_app: &tauri::AppHandle) {}
+
+fn register_global_shortcuts(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    let shortcuts = [
+        "Cmd+Shift+D",
+        "Cmd+Shift+C",
+        "Cmd+Shift+1",
+        "Cmd+Shift+2",
+        "Cmd+Shift+3",
+    ];
+    for s in shortcuts {
+        let shortcut: Shortcut = s.parse().map_err(|e| format!("{e}"))?;
+        app.global_shortcut().register(shortcut).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                match shortcut.id {
+                    0 => {
+                        let _ = send_danmaku(app.clone(), "🔥".to_string(), "#ff6b6b".to_string(), 120.0, Some(0));
+                    }
+                    1 => {
+                        let state = app.state::<AppState>();
+                        let mut todos = state.todos.lock().unwrap();
+                        if let Some(todo) = todos.iter_mut().find(|t| !t.completed) {
+                            todo.completed = true;
+                            *state.dirty.lock().unwrap() = true;
+                            let _ = app.emit_to("main", "todos-updated", ());
+                        }
+                    }
+                    2 => dispatch_by_level(app, "Quick Low", "low", 0),
+                    3 => dispatch_by_level(app, "Quick Mid", "mid", 0),
+                    4 => dispatch_by_level(app, "Quick High", "high", 0),
+                    _ => {}
+                }
+            }
+        }).build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -393,6 +494,13 @@ pub fn run() {
             }
             start_scheduler(app.handle().clone(), state.clone());
             start_persist_thread(app.handle().clone(), state);
+            if let Err(e) = register_global_shortcuts(app.handle()) {
+                log::warn!("register global shortcuts failed: {e}");
+            }
+            if let Err(e) = setup_tray(app.handle()) {
+                log::warn!("setup tray failed: {e}");
+            }
+            hide_dock_icon(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
