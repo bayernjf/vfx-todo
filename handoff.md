@@ -12,7 +12,7 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 
 `feature/20260729` - Multi-screen support + performance optimization + full feature set branch
 
-## Commits (chronological, all pushed)
+## Commits (chronological)
 
 | Hash | Type | Message |
 |------|------|---------|
@@ -38,6 +38,12 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 | 35e8a51 | feat | add edit, search, clear-completed, notification, preferences |
 | 0eb8476 | feat | sort, pre-warning notification, batch select/complete/delete |
 | dd5e017 | test | add E2E/integration tests covering overlay + app flows |
+| ab96a5d | docs | update handoff with full feature list and test coverage |
+| 33bc008 | feat | add dark/light/system theme with CSS variables and toggle |
+| 277c2f3 | feat | add undo toast for complete/delete/batch operations |
+| 283aaed | feat | add drag-and-drop manual reorder with backend persistence |
+
+**Uncommitted:** Playwright E2E test setup (4 local commits ahead of origin)
 
 ## Implemented Features
 
@@ -82,24 +88,39 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 - System tray with quick actions
 - Custom datetime picker for due time
 
-### 7. Testing
+### 7. UX Enhancements
+- Dark / Light / System theme with CSS variables
+- Undo toast for complete/delete/batch operations (auto-dismiss 4s)
+- Drag-and-drop manual reorder with backend persistence
+
+### 8. Testing
 - **Rust integration tests (lib.rs):** CRUD, batch ops, level routing (color/speed/effect), VFX validation, tag validation, Preferences/DanmakuPayload/VfxPayload/ScreenInfo serialization, deterministic effect dispatch, idempotency, edge cases
-- **Frontend tests (vitest):** TodoItem component, helpers, shaders, App integration, Overlay integration (Canvas 2D danmaku + all 7 WebGL effects)
-- All tests passing (74 total: 36 Rust + 38 frontend)
+- **Frontend unit/integration tests (vitest):** TodoItem component, helpers, shaders, App integration, Overlay integration (Canvas 2D danmaku + all 7 WebGL effects)
+- **E2E tests (Playwright):** Full Tauri API mock, Todo CRUD, search/sort/filter, undo, batch operations, theme cycles, drag-and-drop reorder
+- All tests passing (**107 total:** 36 Rust + 38 frontend + 33 E2E)
 
 ## Key Files
 
 ### Frontend
 | File | Purpose |
 |------|---------|
-| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector |
+| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector, theme toggle, undo toast |
 | `src/Overlay.tsx` | Overlay window: WebGL + Canvas 2D effect rendering, 7 VFX types |
-| `src/components/TodoItem.tsx` | Single todo row with countdown timer |
-| `src/styles.css` | All styles including overlay mode, batch bar, sort controls |
+| `src/components/TodoItem.tsx` | Single todo row with countdown timer, drag handle, edit mode |
+| `src/styles.css` | All styles including overlay mode, batch bar, theme CSS vars, drag states |
 | `src/helpers.ts` | Utility functions (level routing, effect dispatch, data export/import) |
 | `src/shaders.ts` | WebGL shader sources (vertex + fragment for all effects) |
 | `src/main.tsx` | React entry point |
-| `src/__tests__/` | Test files (5 files, 38 tests total) |
+| `src/__tests__/` | Vitest test files (5 files, 38 tests total) |
+
+### E2E Tests
+| File | Purpose |
+|------|---------|
+| `playwright.config.ts` | Playwright config: Chromium headless + Vite dev server |
+| `e2e/mocks.ts` | Complete Tauri API mock (13 commands), seed data, preferences |
+| `e2e/app.spec.ts` | Todo CRUD + edit mode (13 tests) |
+| `e2e/filters.spec.ts` | Search, sort, tag filter, undo, batch operations (16 tests) |
+| `e2e/theme-drag.spec.ts` | Theme toggle cycles + drag-and-drop reorder (7 tests) |
 
 ### Backend (Rust)
 | File | Purpose |
@@ -113,29 +134,35 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 | `src-tauri/capabilities/default.json` | Window + system permissions |
 | `src-tauri/tauri.conf.json` | Tauri app configuration |
 | `Cargo.toml` | Rust dependencies (serde, chrono, uuid, rand, etc.) |
-| `package.json` | Frontend dependencies |
-| `vite.config.ts` | Vite + vitest configuration |
+| `package.json` | Frontend dependencies, E2E scripts |
+| `vite.config.ts` | Vite + vitest configuration (excludes e2e/) |
 | `tsconfig.json` | TypeScript config |
 
 ## Commands
 
 ```bash
-npm run dev          # Start frontend dev server
-npm run tauri dev    # Start full Tauri app
-npm run build        # Build frontend
-npm run check        # TypeScript type check (tsc -b)
-npm test             # Run vitest frontend tests
-cargo test           # Run Rust tests
+npm run dev           # Start frontend dev server
+npm run tauri dev     # Start full Tauri app
+npm run build         # Build frontend
+npm run check         # TypeScript type check (tsc --noEmit)
+npm test              # Run vitest frontend unit/integration tests
+npm run test:e2e      # Run Playwright E2E tests
+npm run test:e2e:ui   # Run Playwright in interactive UI mode
+npm run test:e2e:headed # Run Playwright with visible browser
+cargo test            # Run Rust tests
 ```
 
 ## Pending Tasks
 
-1. **Test multi-screen functionality** on actual multi-monitor setup
-2. **Create PR** to merge into integration branch (dev/main - TBD)
+1. **Run E2E tests** on CI pipeline (not yet set up for Playwright)
+2. **Test multi-screen functionality** on actual multi-monitor setup
+3. **Commit E2E test files** to git (`playwright.config.ts`, `e2e/`, package.json changes)
+4. **Create PR** to merge into integration branch (dev/main - TBD)
 
 ## Notes
 
 - Commit messages use English (Conventional Commits format: `type: message`)
 - AGENTS.md file should be kept (project convention)
-- Rust + frontend test suites are passing; run before push
-- `e3fbd94` fixed tsc build artifacts polluting project root (`tsconfig.json` added `outDir`)
+- Rust + frontend + E2E test suites are all passing; run before push
+- E2E tests use a full Tauri API mock in `page.addInitScript` — no Tauri runtime needed
+- `e3fbd94` fixed tsc build artifacts polluting project root (`tsconfig.json` added `outDir`) 
