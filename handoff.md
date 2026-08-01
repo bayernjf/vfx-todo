@@ -42,8 +42,10 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 | 33bc008 | feat | add dark/light/system theme with CSS variables and toggle |
 | 277c2f3 | feat | add undo toast for complete/delete/batch operations |
 | 283aaed | feat | add drag-and-drop manual reorder with backend persistence |
-
-**Uncommitted:** Playwright E2E test setup (4 local commits ahead of origin)
+| 3e7afd8 | chore | add Playwright dependency and config |
+| 9b56d90 | test | add E2E test suites with Tauri API mock |
+| bf43384 | chore | exclude e2e/ from vitest run |
+| 9831583 | docs | update handoff with E2E tests and latest features |
 
 ## Implemented Features
 
@@ -104,12 +106,9 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 ### Frontend
 | File | Purpose |
 |------|---------|
-| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector, theme toggle, undo toast |
+| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector, theme toggle, undo toast; includes TodoItem component, helper functions, shader sources |
 | `src/Overlay.tsx` | Overlay window: WebGL + Canvas 2D effect rendering, 7 VFX types |
-| `src/components/TodoItem.tsx` | Single todo row with countdown timer, drag handle, edit mode |
 | `src/styles.css` | All styles including overlay mode, batch bar, theme CSS vars, drag states |
-| `src/helpers.ts` | Utility functions (level routing, effect dispatch, data export/import) |
-| `src/shaders.ts` | WebGL shader sources (vertex + fragment for all effects) |
 | `src/main.tsx` | React entry point |
 | `src/__tests__/` | Vitest test files (5 files, 38 tests total) |
 
@@ -156,8 +155,7 @@ cargo test            # Run Rust tests
 
 1. **Run E2E tests** on CI pipeline (not yet set up for Playwright)
 2. **Test multi-screen functionality** on actual multi-monitor setup
-3. **Commit E2E test files** to git (`playwright.config.ts`, `e2e/`, package.json changes)
-4. **Create PR** to merge into integration branch (dev/main - TBD)
+3. **Create PR** to merge into integration branch (dev/main - TBD)
 
 ## Notes
 
