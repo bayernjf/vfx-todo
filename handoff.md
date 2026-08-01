@@ -98,8 +98,8 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 ### 8. Testing
 - **Rust integration tests (lib.rs):** CRUD, batch ops, level routing (color/speed/effect), VFX validation, tag validation, Preferences/DanmakuPayload/VfxPayload/ScreenInfo serialization, deterministic effect dispatch, idempotency, edge cases
 - **Frontend unit/integration tests (vitest):** TodoItem component, helpers, shaders, App integration, Overlay integration (Canvas 2D danmaku + all 7 WebGL effects)
-- **E2E tests (Playwright):** Full Tauri API mock, Todo CRUD, search/sort/filter, undo, batch operations, theme cycles, drag-and-drop reorder
-- All tests passing (**107 total:** 36 Rust + 38 frontend + 33 E2E)
+- **E2E tests (Playwright):** Full Tauri API mock, Todo CRUD, search/sort/filter, undo, batch operations, theme cycles, drag-and-drop reorder, multi-screen routing
+- All tests passing (**112 total:** 36 Rust + 38 frontend + 38 E2E)
 
 ## Key Files
 
@@ -120,6 +120,7 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 | `e2e/app.spec.ts` | Todo CRUD + edit mode (13 tests) |
 | `e2e/filters.spec.ts` | Search, sort, tag filter, undo, batch operations (16 tests) |
 | `e2e/theme-drag.spec.ts` | Theme toggle cycles + drag-and-drop reorder (7 tests) |
+| `e2e/multi-screen.spec.ts` | Multi-screen selector, danmaku/vfx routing, edit reassignment (5 tests) |
 
 ### Backend (Rust)
 | File | Purpose |
@@ -153,9 +154,9 @@ cargo test            # Run Rust tests
 
 ## Pending Tasks
 
-1. **Run E2E tests** on CI pipeline (not yet set up for Playwright)
-2. **Test multi-screen functionality** on actual multi-monitor setup
-3. **Create PR** to merge into integration branch (dev/main - TBD)
+1. ~~Run E2E tests on CI pipeline~~ **DONE** — `.github/workflows/ci.yml` runs `cargo test` + `npm test` + `npm run test:e2e` on every push/PR
+2. **Verify multi-screen on real multi-monitor hardware** — E2E now covers the UI/routing logic via mock (`list_screens`), but true cross-screen effect delivery needs a real multi-display machine
+3. **Create PR** to merge `feature/20260729` into integration branch (dev/main - TBD)
 
 ## Notes
 
@@ -163,4 +164,4 @@ cargo test            # Run Rust tests
 - AGENTS.md file should be kept (project convention)
 - Rust + frontend + E2E test suites are all passing; run before push
 - E2E tests use a full Tauri API mock in `page.addInitScript` — no Tauri runtime needed
-- `e3fbd94` fixed tsc build artifacts polluting project root (`tsconfig.json` added `outDir`) 
+- Playwright `webServer` points at the Vite dev port **1420** (Tauri's fixed port); `reuseExistingServer: false` avoids colliding with other local dev servers
