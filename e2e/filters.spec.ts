@@ -111,7 +111,7 @@ test.describe("Tag Filter", () => {
     await workPill.click();
 
     await expect(page.locator(TODO_ITEM)).toHaveCount(2);
-    await expect(page.locator(TODO_TITLE).first()).toContainText("Work");
+    await expect(page.locator(TODO_TITLE).first()).toContainText("work");
   });
 
   test("click active tag filter again clears it", async ({ page }) => {
