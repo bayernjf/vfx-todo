@@ -829,7 +829,8 @@ fn hide_dock_icon(_app: &tauri::AppHandle) {
     unsafe {
         let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
         // NSApplicationActivationPolicyAccessory = 1
-        let _: () = msg_send![ns_app, setActivationPolicy: 1i64];
+        // setActivationPolicy: returns BOOL on modern macOS runtimes.
+        let _: bool = msg_send![ns_app, setActivationPolicy: 1i64];
     }
 }
 
