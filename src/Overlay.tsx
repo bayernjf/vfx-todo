@@ -42,7 +42,7 @@ void main() {
 const SHATTER_FRAG_SRC = `
 precision mediump float;
 uniform vec2 u_resolution;
-uniform float u_time;      // 0 → 1 进度
+uniform float u_time;      // 0 → 1 缓动进度
 uniform vec2 u_center;     // 破碎中心（0-1）
 uniform vec3 u_color;
 uniform float u_seed;
@@ -69,31 +69,27 @@ void main() {
 
   // 裂纹：角度 + 距离的双层噪声
   float angle = atan(toCenter.y, toCenter.x);
-  float crack1 = noise(vec2(angle * 8.0, dist * 20.0 + u_seed * 10.0));
-  float crack2 = noise(vec2(angle * 16.0, dist * 30.0 - u_seed * 5.0));
-  float crackMask = step(0.72, crack1 * crack2);
+  float crack1 = noise(vec2(angle * 8.0, dist * 16.0 + u_seed * 10.0));
+  float crack2 = noise(vec2(angle * 16.0, dist * 24.0 - u_seed * 5.0));
+  float crackMask = smoothstep(0.7, 0.85, crack1 * crack2);
 
-  // 裂纹扩散波：随时间从中心向外
-  float wave = u_time * 0.7;
-  float waveMask = smoothstep(wave + 0.08, wave - 0.08, dist);
+  // 裂纹扩散波：随时间从中心向外，柔化边缘
+  float wave = u_time * 0.85;
+  float waveMask = smoothstep(wave + 0.12, wave - 0.12, dist);
 
-  // 闪光：开始时全屏白光，指数衰减
-  float flash = exp(-u_time * 4.0);
+  // 柔和起手光晕：着色而非纯白，强度大幅降低
+  float flash = exp(-u_time * 3.0) * 0.18;
 
-  // 边缘震动线条
-  float ring = smoothstep(0.005, 0.0, abs(dist - wave));
-  ring *= step(0.3, u_time);
-
-  vec3 color = u_color * crackMask * waveMask * 1.8;
-  color += vec3(1.0) * flash * 0.5;
-  color += u_color * ring * 1.5;
+  vec3 color = u_color * crackMask * waveMask * 1.0;
+  color += mix(u_color, vec3(1.0), 0.3) * flash;
 
   // vignette
-  float vig = 1.0 - smoothstep(0.4, 0.9, dist);
-  color *= mix(0.6, 1.0, vig);
+  float vig = 1.0 - smoothstep(0.35, 0.95, dist);
+  color *= mix(0.75, 1.0, vig);
 
-  float alpha = max(crackMask * waveMask, max(flash * 0.6, ring));
-  gl_FragColor = vec4(color, alpha);
+  float fadeIn = smoothstep(0.0, 0.06, u_time);
+  float alpha = max(crackMask * waveMask * 0.9, flash) * fadeIn;
+  gl_FragColor = vec4(color * fadeIn, alpha);
 }
 `;
 
@@ -115,32 +111,32 @@ void main() {
   vec2 toCenter = uv - u_center;
   float dist = length(toCenter);
 
-  // 粒子：多层 hash 网格
+  // 粒子：更稀疏的多层网格，节奏舒缓
   float particles = 0.0;
   for (float i = 1.0; i <= 4.0; i++) {
-    vec2 grid = uv * (20.0 * i) + u_seed * i;
+    vec2 grid = uv * (16.0 * i) + u_seed * i;
     vec2 cell = floor(grid);
     vec2 cellUv = fract(grid) - 0.5;
     float r = hash(cell + i);
-    // 粒子向中心移动
     vec2 offset = vec2(hash(cell), hash(cell + 1.0)) - 0.5;
     float pull = 1.0 - u_time;
-    vec2 pos = cellUv + offset * pull * 0.3;
+    vec2 pos = cellUv + offset * pull * 0.25;
     float d = length(pos);
-    float size = (0.15 + r * 0.1) * (1.0 - u_time * 0.5);
-    particles += smoothstep(size, size * 0.5, d) * r;
+    float size = (0.12 + r * 0.08) * (1.0 - u_time * 0.6);
+    particles += smoothstep(size, size * 0.4, d) * r;
   }
 
   // 中心光晕：聚集时变亮
-  float glow = exp(-dist * 4.0) * u_time;
-  float flash = exp(-u_time * 3.0) * 0.3;
+  float glow = exp(-dist * 5.0) * u_time;
+  float flash = exp(-u_time * 3.0) * 0.12;
 
-  vec3 color = u_color * particles * 1.2;
-  color += u_color * glow * 0.8;
-  color += vec3(1.0) * flash;
+  vec3 color = u_color * particles * 0.9;
+  color += u_color * glow * 0.7;
+  color += mix(u_color, vec3(1.0), 0.25) * flash;
 
-  float alpha = max(particles * 0.7, max(glow, flash));
-  gl_FragColor = vec4(color, alpha);
+  float fadeIn = smoothstep(0.0, 0.06, u_time);
+  float alpha = max(particles * 0.6, max(glow, flash)) * fadeIn;
+  gl_FragColor = vec4(color * fadeIn, alpha);
 }
 `;
 
@@ -156,13 +152,14 @@ void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
   float rain = 0.0;
   for (float i = 1.0; i <= 5.0; i++) {
-    float speed = 0.5 + i * 0.15;
-    float x = hash(vec2(i, u_seed)) + sin(u_time * 0.3 + i) * 0.1;
-    float y = fract(uv.x * (8.0 + i * 3.0) + x + u_time * speed);
-    float drop = smoothstep(0.02, 0.0, abs(uv.y - y)) * smoothstep(0.3, 0.0, length(uv - vec2(x, y)));
+    float speed = 0.3 + i * 0.08;
+    float x = hash(vec2(i, u_seed)) + sin(u_time * 0.25 + i) * 0.08;
+    float y = fract(uv.x * (6.0 + i * 2.5) + x + u_time * speed);
+    float drop = smoothstep(0.03, 0.0, abs(uv.y - y)) * smoothstep(0.35, 0.0, length(uv - vec2(x, y)));
     rain += drop;
   }
-  gl_FragColor = vec4(u_color * (0.5 + rain * 2.0), rain * 0.6 + 0.05);
+  float fadeIn = smoothstep(0.0, 0.1, u_time);
+  gl_FragColor = vec4(u_color * (0.4 + rain * 1.4), rain * 0.32 + 0.04) * fadeIn;
 }
 `;
 
@@ -179,18 +176,19 @@ void main() {
   uv.x *= u_resolution.x / u_resolution.y;
   float t = u_time;
   float burst = 0.0;
-  for (float i = 0.0; i < 40.0; i++) {
-    float angle = i * 0.314 + hash(vec2(i, u_seed)) * 0.5;
-    float speed = 0.3 + hash(vec2(i + 1.0, u_seed)) * 0.4;
+  for (float i = 0.0; i < 36.0; i++) {
+    float angle = i * 0.349 + hash(vec2(i, u_seed)) * 0.5;
+    float speed = 0.25 + hash(vec2(i + 1.0, u_seed)) * 0.35;
     float r = t * speed;
     vec2 pos = vec2(cos(angle), sin(angle)) * r;
     float d = length(uv - pos);
-    float size = 0.015 * (1.0 - t);
+    float size = 0.02 * (1.0 - t);
     burst += smoothstep(size, 0.0, d) * (1.0 - t);
   }
-  float glow = exp(-length(uv) * 3.0) * (1.0 - t) * 0.5;
-  vec3 col = u_color * burst + vec3(1.0, 0.9, 0.6) * glow;
-  gl_FragColor = vec4(col, max(burst, glow));
+  float glow = exp(-length(uv) * 3.5) * (1.0 - t) * 0.35;
+  vec3 col = u_color * burst * 0.8 + vec3(1.0, 0.85, 0.65) * glow;
+  float fadeIn = smoothstep(0.0, 0.08, u_time);
+  gl_FragColor = vec4(col * fadeIn, max(burst, glow) * fadeIn);
 }
 `;
 
@@ -203,12 +201,13 @@ uniform vec3 u_color;
 uniform float u_seed;
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-  vec2 center = 0.5 + vec2(sin(u_seed) * 0.2, cos(u_seed * 1.3) * 0.2);
+  vec2 center = 0.5 + vec2(sin(u_seed) * 0.15, cos(u_seed * 1.3) * 0.15);
   float dist = length(uv - center);
-  float rings = sin(dist * 40.0 - u_time * 6.0) * 0.5 + 0.5;
-  rings *= exp(-dist * 3.0) * (1.0 - u_time * 0.3);
-  float alpha = rings * 0.5 * (1.0 - u_time);
-  gl_FragColor = vec4(u_color * (0.3 + rings), alpha);
+  float rings = sin(dist * 28.0 - u_time * 3.5) * 0.5 + 0.5;
+  rings *= exp(-dist * 3.0) * (1.0 - u_time * 0.25);
+  float fadeIn = smoothstep(0.0, 0.08, u_time);
+  float alpha = rings * 0.42 * (1.0 - u_time) * fadeIn;
+  gl_FragColor = vec4(u_color * (0.3 + rings * 0.8) * fadeIn, alpha);
 }
 `;
 
@@ -222,12 +221,14 @@ uniform float u_seed;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-  float angle = u_time * 3.14159 * 2.0 + u_seed;
+  // 半圈旋转（更慢），减少扫动带来的眩晕
+  float angle = u_time * 3.14159 + u_seed;
   vec2 dir = vec2(cos(angle), sin(angle));
   float dist = abs(dot(uv - 0.5, vec2(-dir.y, dir.x)));
-  float beam = smoothstep(0.05, 0.0, dist) * (1.0 - u_time * 0.5);
-  float flash = hash(vec2(floor(u_time * 20.0), u_seed)) * smoothstep(0.02, 0.0, dist) * 0.5;
-  gl_FragColor = vec4(u_color * (beam + flash), beam * 0.8 + flash);
+  float beam = smoothstep(0.09, 0.0, dist) * (1.0 - u_time * 0.4);
+  float fadeIn = smoothstep(0.0, 0.1, u_time);
+  float fadeOut = 1.0 - smoothstep(0.7, 1.0, u_time);
+  gl_FragColor = vec4(u_color * (beam * 0.9), beam * 0.55 * fadeIn * fadeOut);
 }
 `;
 
@@ -243,19 +244,22 @@ void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
   float t = u_time;
   float glitch = 0.0;
-  for (float i = 0.0; i < 8.0; i++) {
+  for (float i = 0.0; i < 6.0; i++) {
     float y = hash(vec2(i, u_seed)) * 0.8 + 0.1;
-    float h = 0.01 + hash(vec2(i + 10.0, u_seed)) * 0.03;
-    float shift = (hash(vec2(i + 20.0, u_seed + floor(t * 10.0))) - 0.5) * 0.1 * (1.0 - t);
+    float h = 0.008 + hash(vec2(i + 10.0, u_seed)) * 0.02;
+    // 错位位移大幅降低，避免横向抖动眩晕
+    float shift = (hash(vec2(i + 20.0, u_seed + floor(t * 6.0))) - 0.5) * 0.025 * (1.0 - t);
     float line = smoothstep(h, 0.0, abs(uv.y - y));
     glitch += line;
     if (abs(uv.y - y) < h) {
       uv.x += shift;
     }
   }
-  float noise = hash(uv * 100.0 + floor(t * 30.0));
-  vec3 col = mix(u_color, vec3(noise), 0.3) * (1.0 + glitch * 2.0);
-  gl_FragColor = vec4(col, (glitch + noise * 0.2) * (1.0 - t));
+  float noise = hash(uv * 80.0 + floor(t * 12.0));
+  vec3 col = mix(u_color, vec3(noise), 0.12) * (1.0 + glitch * 0.8);
+  float fadeIn = smoothstep(0.0, 0.06, u_time);
+  float fadeOut = 1.0 - smoothstep(0.75, 1.0, u_time);
+  gl_FragColor = vec4(col * fadeIn, (glitch + noise * 0.12) * (1.0 - t) * fadeIn * fadeOut);
 }
 `;
 
@@ -279,6 +283,7 @@ class VfxEngine {
   private currentProgram: WebGLProgram | null = null;
   private currentUniforms: Record<string, WebGLUniformLocation | null> = {};
   private currentColor: string = "#ff6b6b";
+  private currentSeed = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl", {
@@ -362,6 +367,7 @@ class VfxEngine {
       return;
     }
     this.currentColor = color;
+    this.currentSeed = Math.random() * 100;
     this.getOrBuildProgram(fragSrc);
 
     const dpr = window.devicePixelRatio;
@@ -386,14 +392,16 @@ class VfxEngine {
     if (!gl || !this.currentProgram) return;
     const elapsed = performance.now() - this.startTime;
     const t = Math.min(elapsed / this.duration, 1);
+    // 缓动进度：平滑淡入淡出，避免突兀闪烁
+    const te = t * t * (3 - 2 * t);
 
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.currentProgram);
     gl.uniform2f(this.currentUniforms.u_resolution, this.canvas.width, this.canvas.height);
-    gl.uniform1f(this.currentUniforms.u_time, t);
+    gl.uniform1f(this.currentUniforms.u_time, te);
     gl.uniform2f(this.currentUniforms.u_center, 0.5, 0.5);
     gl.uniform3f(this.currentUniforms.u_color, ...this.hexToRgb(this.currentColor));
-    gl.uniform1f(this.currentUniforms.u_seed, Math.random() * 100);
+    gl.uniform1f(this.currentUniforms.u_seed, this.currentSeed);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     if (t < 1) {
@@ -639,6 +647,9 @@ function Overlay() {
             continue;
           }
           ctx.fillStyle = it.color;
+          ctx.lineWidth = 3 * dpr;
+          ctx.strokeStyle = "rgba(0,0,0,0.45)";
+          ctx.strokeText(it.text, it.x, it.y);
           ctx.fillText(it.text, it.x, it.y);
         }
         ctx.shadowBlur = 0;
