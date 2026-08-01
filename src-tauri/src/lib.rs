@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tauri::{Emitter, Manager, WebviewWindowBuilder};
+use tauri::{Emitter, Listener, Manager, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
@@ -57,7 +57,7 @@ struct Todo {
     order: i64,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct DanmakuPayload {
     id: f64,
     text: String,
@@ -65,7 +65,7 @@ struct DanmakuPayload {
     speed: f64,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct VfxPayload {
     id: f64,
     effect: String, // "shatter" | "particle" | "rain" | "firework" | "ripple" | "laser" | "glitch"
@@ -687,6 +687,94 @@ fn set_cursor_passthrough(window: tauri::WebviewWindow, ignore: bool) -> Result<
         .map_err(|e| e.to_string())
 }
 
+// ============ 真实多屏硬件自检 ============
+//
+// 仅当环境变量 VFX_TODO_SELFTEST 存在时由 setup 调用。
+// 它在真实显示器上创建 overlay 窗口，并用 Rust 侧 window.listen 验证
+// emit_to("overlay-{n}") 的精确投递（不广播到其它屏），最后打印 JSON 报告并退出。
+// 这是 E2E mock 无法覆盖的核心正确性点。
+
+#[derive(Clone, serde::Serialize)]
+struct DeliveryRecord {
+    window: String,
+    event: String,
+    text: String,
+}
+
+fn run_multi_screen_self_test(app: &tauri::AppHandle) {
+    use std::io::Write;
+
+    let deliveries = std::sync::Arc::new(std::sync::Mutex::new(Vec::<DeliveryRecord>::new()));
+
+    // 真实显示器数量（与 spawn_overlay_windows 使用的枚举一致）
+    let screen_count = app.available_monitors().map(|m| m.len()).unwrap_or(0).max(1);
+    log::info!("selftest: detected {} screen(s)", screen_count);
+
+    // 为每个真实 overlay 窗口注册 Rust 侧监听，记录收件情况
+    for idx in 0..screen_count {
+        let label = format!("overlay-{}", idx);
+        if let Some(win) = app.get_webview_window(&label) {
+            let l1 = label.clone();
+            let d1 = deliveries.clone();
+            let _h1 = win.listen("danmaku", move |ev| {
+                if let Ok(p) = serde_json::from_str::<DanmakuPayload>(ev.payload()) {
+                    d1.lock().unwrap().push(DeliveryRecord {
+                        window: l1.clone(),
+                        event: "danmaku".into(),
+                        text: p.text,
+                    });
+                }
+            });
+            let l2 = label.clone();
+            let d2 = deliveries.clone();
+            let _h2 = win.listen("vfx", move |ev| {
+                if let Ok(p) = serde_json::from_str::<VfxPayload>(ev.payload()) {
+                    d2.lock().unwrap().push(DeliveryRecord {
+                        window: l2.clone(),
+                        event: "vfx".into(),
+                        text: p.text,
+                    });
+                }
+            });
+        }
+    }
+
+    let screens = list_screens(app.clone()).unwrap_or_default();
+
+    let app2 = app.clone();
+    let deliveries2 = deliveries.clone();
+    std::thread::spawn(move || {
+        // 等待 webview 就绪
+        std::thread::sleep(Duration::from_millis(800));
+
+        // 定向派发：danmaku → overlay-1，vfx → overlay-2（若屏幕足够）
+        if app2.get_webview_window("overlay-1").is_some() {
+            let _ = send_danmaku(app2.clone(), "SELFTEST-DANMAKU-1".into(), "#ff0000".into(), 100.0, Some(1));
+        }
+        if app2.get_webview_window("overlay-2").is_some() {
+            dispatch_vfx(&app2, "SELFTEST-VFX-2", "shatter", "mid", 2);
+        }
+        // 对 overlay-0 也发一条，确认基础链路能到达
+        let _ = send_danmaku(app2.clone(), "SELFTEST-DANMAKU-0".into(), "#00ff00".into(), 100.0, Some(0));
+
+        std::thread::sleep(Duration::from_millis(800));
+
+        let locked = deliveries2.lock().unwrap();
+        let report = serde_json::json!({
+            "screen_count": screens.len(),
+            "screens": screens,
+            "deliveries": *locked,
+        });
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "===== VFX_MULTISCREEN_SELFTEST =====");
+        let _ = writeln!(out, "{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+        let _ = writeln!(out, "===== END VFX_MULTISCREEN_SELFTEST =====");
+        let _ = out.flush();
+        std::thread::sleep(Duration::from_millis(200));
+        app2.exit(0);
+    });
+}
+
 // ============ 启动 ============
 
 fn setup_tray(app: &tauri::AppHandle) -> Result<(), String> {
@@ -911,6 +999,13 @@ pub fn run() {
             if let Err(e) = spawn_overlay_windows(app.handle()) {
                 log::warn!("spawn overlay windows failed: {e}");
             }
+
+            // 真实多屏硬件自检：环境变量触发，打印报告后立即退出
+            if std::env::var("VFX_TODO_SELFTEST").is_ok() {
+                run_multi_screen_self_test(app.handle());
+                return Ok(());
+            }
+
             start_scheduler(app.handle().clone(), state.clone());
             start_persist_thread(app.handle().clone(), state);
             if let Err(e) = register_global_shortcuts(app.handle()) {

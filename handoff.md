@@ -73,6 +73,7 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 - Backend routes effects to specific screen via `overlay-{screen_id}` window label
 - Uses `emit_to` instead of broadcast `emit` for precise targeting
 - Fallback to `overlay-0` if target screen not found
+- **Real-hardware self-test (DONE):** `run_multi_screen_self_test` in `lib.rs`, gated by env var `VFX_TODO_SELFTEST`. On a real multi-monitor machine it enumerates real screens, spawns one overlay window per physical display, and uses Rust-side `window.listen` to prove `emit_to` delivers **only** to the targeted `overlay-{n}` (no broadcast). Verified on a 3-display macOS setup (2026-08-01): `list_screens` returned 3 monitors; danmaku→overlay-1, vfx→overlay-2, danmaku→overlay-0 each arrived at exactly one window with zero cross-screen leakage. Run with: `VFX_TODO_SELFTEST=1 npm run tauri dev`
 
 ### 4. Notifications & Pre-Warning
 - Native notification when todo is due
@@ -155,7 +156,7 @@ cargo test            # Run Rust tests
 ## Pending Tasks
 
 1. ~~Run E2E tests on CI pipeline~~ **DONE** — `.github/workflows/ci.yml` runs `cargo test` + `npm test` + `npm run test:e2e` on every push/PR
-2. **Verify multi-screen on real multi-monitor hardware** — E2E now covers the UI/routing logic via mock (`list_screens`), but true cross-screen effect delivery needs a real multi-display machine
+2. ~~Verify multi-screen on real multi-monitor hardware~~ **DONE** — real-hardware self-test (`VFX_TODO_SELFTEST=1 npm run tauri dev`) verified 3-display routing isolation on 2026-08-01
 3. **Create PR** to merge `feature/20260729` into integration branch (dev/main - TBD)
 
 ## Notes
