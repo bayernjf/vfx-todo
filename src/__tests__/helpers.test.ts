@@ -44,24 +44,13 @@ describe("formatDue", () => {
 
 // ====== 常量一致性 ======
 describe("constants", () => {
-  it("LEVEL_LABEL covers all levels", () => {
-    const LABEL: Record<string, string> = {
-      low: "弹幕",
-      mid: "粒子",
-      high: "破碎",
-    };
-    expect(Object.keys(LABEL)).toEqual(["low", "mid", "high"]);
-    expect(LABEL["low"]).toBeTruthy();
-    expect(LABEL["mid"]).toBeTruthy();
-    expect(LABEL["high"]).toBeTruthy();
-  });
-
-  it("EFFECT_LABEL covers all 7 effects", () => {
-    const EXPECTED = ["shatter", "particle", "rain", "firework", "ripple", "laser", "glitch"];
+  it("EFFECT_LABEL covers all 8 effects (danmaku first)", () => {
+    const EXPECTED = ["danmaku", "shatter", "particle", "rain", "firework", "ripple", "laser", "glitch"];
     for (const e of EXPECTED) {
       expect(e).toBeTruthy();
     }
-    expect(EXPECTED.length).toBe(7);
+    expect(EXPECTED.length).toBe(8);
+    expect(EXPECTED[0]).toBe("danmaku");
   });
 
   it("TAG_COLOR covers 工作/生活/紧急", () => {

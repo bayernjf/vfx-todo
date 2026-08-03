@@ -6,8 +6,6 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 // 直接用内联 TodoItem 实现（避免污染测试的 tauri mock）
-type Level = "low" | "mid" | "high";
-
 function TodoItem({
   todo,
   onComplete,
@@ -17,7 +15,6 @@ function TodoItem({
   todo: {
     id: string;
     title: string;
-    level: Level;
     completed: boolean;
     created_at: number;
     due_at: number | null;
@@ -29,13 +26,11 @@ function TodoItem({
   onDelete: (id: string) => void;
   onTrigger: (todo: any) => void;
 }) {
-  const levelLabel: Record<Level, string> = { low: "弹幕", mid: "粒子", high: "破碎" };
   const effectLabel: Record<string, string> = { rain: "雨", firework: "烟花", laser: "激光", ripple: "水波", glitch: "故障", shatter: "破碎", particle: "粒子" };
   const tagColor: Record<string, string> = { 工作: "#ff6b6b", 生活: "#4ecdc4", 紧急: "#f9ca24" };
 
   return (
     <div className={`todo-item ${todo.completed ? "completed" : ""}`}>
-      <span className="todo-level">{levelLabel[todo.level]}</span>
       <div className="todo-content">
         <span
           className="todo-title"
@@ -77,7 +72,6 @@ function TodoItem({
 const baseTodo = {
   id: "1",
   title: "测试待办",
-  level: "mid" as Level,
   completed: false,
   created_at: Date.now(),
   due_at: null,
@@ -87,12 +81,11 @@ const baseTodo = {
 };
 
 describe("TodoItem", () => {
-  it("renders title and level", () => {
+  it("renders title", () => {
     render(
       <TodoItem todo={baseTodo} onComplete={vi.fn()} onDelete={vi.fn()} onTrigger={vi.fn()} />
     );
     expect(screen.getByText("测试待办")).toBeInTheDocument();
-    expect(screen.getByText("粒子")).toBeInTheDocument();
   });
 
   it("shows completed class when done", () => {
@@ -185,21 +178,5 @@ describe("TodoItem", () => {
       />
     );
     expect(screen.getByText("雨")).toBeInTheDocument();
-  });
-
-  it("renders low level as 弹幕", () => {
-    const low = { ...baseTodo, level: "low" as Level };
-    render(
-      <TodoItem todo={low} onComplete={vi.fn()} onDelete={vi.fn()} onTrigger={vi.fn()} />
-    );
-    expect(screen.getByText("弹幕")).toBeInTheDocument();
-  });
-
-  it("renders high level as 破碎", () => {
-    const high = { ...baseTodo, level: "high" as Level };
-    render(
-      <TodoItem todo={high} onComplete={vi.fn()} onDelete={vi.fn()} onTrigger={vi.fn()} />
-    );
-    expect(screen.getByText("破碎")).toBeInTheDocument();
   });
 });
