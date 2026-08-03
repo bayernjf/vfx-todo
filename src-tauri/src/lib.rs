@@ -678,50 +678,82 @@ fn set_current_effect(app: tauri::AppHandle, effect: String) -> Result<(), Strin
     Ok(())
 }
 
-/// macOS: 通过 NSScreen.localizedName 获取真实显示器名称
+/// macOS: 通过 CGDisplay + IOKit 获取显示器名称（线程安全，无需主线程）
 #[cfg(target_os = "macos")]
-fn get_macos_screen_names() -> Vec<String> {
+fn get_macos_display_names() -> Vec<String> {
+    #[link(name = "IOKit", kind = "framework")]
     extern "C" {
-        // dispatch_get_main_queue() 是宏，展开为 &_dispatch_main_q
-        static _dispatch_main_q: u8;
-        fn dispatch_sync_f(
-            queue: *mut std::ffi::c_void,
-            context: *mut std::ffi::c_void,
-            work: extern "C" fn(*mut std::ffi::c_void),
-        );
+        fn CGGetActiveDisplayList(max: u32, ids: *mut u32, count: *mut u32) -> i32;
+        fn CGDisplayIsBuiltin(id: u32) -> i32;
+        fn CGDisplayIOServicePort(id: u32) -> u32;
+        fn IORegistryEntryCreateCFProperty(
+            entry: u32,
+            key: *const std::ffi::c_void,
+            allocator: *const std::ffi::c_void,
+            options: u32,
+        ) -> *const std::ffi::c_void;
+        fn IOObjectRelease(obj: u32) -> i32;
+        fn CFStringCreateWithCString(
+            alloc: *const std::ffi::c_void,
+            cstr: *const i8,
+            encoding: u32,
+        ) -> *const std::ffi::c_void;
+        fn CFStringGetCStringPtr(
+            str: *const std::ffi::c_void,
+            encoding: u32,
+        ) -> *const i8;
+        fn CFRelease(cf: *const std::ffi::c_void);
     }
 
-    struct SyncContext {
-        names: Vec<String>,
-    }
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
 
-    extern "C" fn work(ctx_ptr: *mut std::ffi::c_void) {
-        unsafe {
-            let ctx = &mut *(ctx_ptr as *mut SyncContext);
-            use objc2_app_kit::NSScreen;
-            use objc2_foundation::MainThreadMarker;
+    let mut ids = [0u32; 16];
+    let mut count: u32 = 0;
 
-            // dispatch_sync_f 已确保在主线程执行
-            let mtm = MainThreadMarker::new_unchecked();
-            let screens = NSScreen::screens(mtm);
-            for i in 0..screens.count() {
-                let screen = screens.objectAtIndex(i);
-                let name = screen.localizedName();
-                ctx.names.push(name.to_string());
-            }
-        }
-    }
-
-    let mut ctx = Box::new(SyncContext { names: Vec::new() });
-    let ctx_ptr = ctx.as_mut() as *mut SyncContext as *mut std::ffi::c_void;
     unsafe {
-        dispatch_sync_f(
-            &_dispatch_main_q as *const u8 as *mut std::ffi::c_void,
-            ctx_ptr,
-            work,
-        );
+        if CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) != 0 || count == 0 {
+            return Vec::new();
+        }
+
+        let mut result = Vec::with_capacity(count as usize);
+        for i in 0..count as usize {
+            let id = ids[i];
+            let is_builtin = CGDisplayIsBuiltin(id) != 0;
+
+            let name = if is_builtin {
+                "内建屏".to_string()
+            } else {
+                let port = CGDisplayIOServicePort(id);
+                if port == 0 {
+                    format!("外接屏 {}", i + 1)
+                } else {
+                    let key = CFStringCreateWithCString(
+                        std::ptr::null(),
+                        "DisplayProductName\0".as_ptr() as *const i8,
+                        K_CF_STRING_ENCODING_UTF8,
+                    );
+                    let value = IORegistryEntryCreateCFProperty(port, key, std::ptr::null(), 0);
+                    CFRelease(key);
+                    IOObjectRelease(port);
+
+                    if value.is_null() {
+                        format!("外接屏 {}", i + 1)
+                    } else {
+                        let ptr = CFStringGetCStringPtr(value, K_CF_STRING_ENCODING_UTF8);
+                        let name = if !ptr.is_null() {
+                            std::ffi::CStr::from_ptr(ptr).to_string_lossy().to_string()
+                        } else {
+                            format!("外接屏 {}", i + 1)
+                        };
+                        CFRelease(value);
+                        name
+                    }
+                }
+            };
+            result.push(name);
+        }
+        result
     }
-    ctx.names
 }
 
 /// Windows: 通过 EnumDisplayDevicesW 获取显示器友好名称
@@ -760,9 +792,9 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
     }
     let primary_name: Option<&str> = primary.as_ref().and_then(|m| m.name()).map(|s| s.as_str());
 
-    // macOS: 用 NSScreen.localizedName 拿真实名称
+    // macOS: 用 CGDisplay + IOKit 拿真实名称（线程安全）
     #[cfg(target_os = "macos")]
-    let macos_names = get_macos_screen_names();
+    let macos_names = get_macos_display_names();
 
     let screens = all_monitors
         .iter()
@@ -770,17 +802,11 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
         .map(|(idx, m)| {
             let is_primary = m.name().map(|s| s.as_str()) == primary_name;
 
-            // ── macOS: NSScreen.localizedName ──
+            // ── macOS: CGDisplay + IOKit ──
             #[cfg(target_os = "macos")]
             let resolved: Option<String> = {
                 let raw = macos_names.get(idx).cloned().unwrap_or_default();
-                if raw.contains("内建") || raw.contains("Built-in") {
-                    Some("内建屏".to_string())
-                } else if !raw.is_empty() {
-                    Some(raw)
-                } else {
-                    None
-                }
+                if !raw.is_empty() { Some(raw) } else { None }
             };
 
             // ── Windows: EnumDisplayDevicesW 友好名称 ──

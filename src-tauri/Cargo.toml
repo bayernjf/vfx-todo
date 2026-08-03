@@ -23,8 +23,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = ["macos-private-api", "tray-icon"] }
 objc2 = "0.5"
-objc2-app-kit = { version = "0.2", features = ["NSScreen"] }
-objc2-foundation = { version = "0.2", features = ["NSString", "NSArray"] }
 tauri-plugin-log = "2"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-dialog = "2.7.2"
