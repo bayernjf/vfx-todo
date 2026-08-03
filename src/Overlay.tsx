@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 interface DanmakuItem {
   id: number;
@@ -710,7 +710,7 @@ function Overlay() {
     let unlistenFlash: (() => void) | undefined;
 
     (async () => {
-      const u1 = await listen<DanmakuItem>("danmaku", (event) => {
+      const u1 = await getCurrentWebviewWindow().listen<DanmakuItem>("danmaku", (event) => {
         const p = event.payload;
         const canvas = danmakuCanvasRef.current;
         if (!canvas) return;
@@ -757,7 +757,7 @@ function Overlay() {
       }
       unlistenDanmaku = u1;
 
-      const u2 = await listen<VfxPayload>("vfx", (event) => {
+      const u2 = await getCurrentWebviewWindow().listen<VfxPayload>("vfx", (event) => {
         const p = event.payload;
         setVfxText(p.text);
         setVfxTextColor(p.color);
@@ -774,7 +774,7 @@ function Overlay() {
       }
       unlistenVfx = u2;
 
-      const u3 = await listen<any>("screen-flash", (event) => {
+      const u3 = await getCurrentWebviewWindow().listen<any>("screen-flash", (event) => {
         const name = event.payload?.screen_name || "";
         setFlashScreenName(name);
         clearTimeout(flashTimerRef.current);
