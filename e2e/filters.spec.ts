@@ -19,9 +19,9 @@ test.describe("Search", () => {
   test("search filters todos", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Buy groceries", level: "low" },
-        { title: "Write code", level: "mid" },
-        { title: "Buy milk", level: "low" },
+        { title: "Buy groceries" },
+        { title: "Write code" },
+        { title: "Buy milk" },
       ],
     });
     await page.goto("/");
@@ -41,7 +41,7 @@ test.describe("Search", () => {
 
   test("search with no results shows empty state", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Only task", level: "low" }],
+      seed: [{ title: "Only task" }],
     });
     await page.goto("/");
 
@@ -57,8 +57,8 @@ test.describe("Sort", () => {
   test("sort selector is present with options", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Task A", level: "low" },
-        { title: "Task B", level: "low" },
+        { title: "Task A" },
+        { title: "Task B" },
       ],
     });
     await page.goto("/");
@@ -70,26 +70,24 @@ test.describe("Sort", () => {
     expect(options.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("sort by level changes order", async ({ page }) => {
+  test("sort by due changes order", async ({ page }) => {
+    const now = Date.now();
     await setupPage(page, {
       seed: [
-        { title: "Low task", level: "low" },
-        { title: "High task", level: "high" },
-        { title: "Mid task", level: "mid" },
+        { title: "Later task", due_time: now + 1000 * 60 * 10 },
+        { title: "Soon task", due_time: now + 1000 * 60 * 1 },
+        { title: "Mid task", due_time: now + 1000 * 60 * 5 },
       ],
     });
     await page.goto("/");
 
     const sortSelect = page.locator(".sort-select");
-    await sortSelect.selectOption("level");
+    await sortSelect.selectOption("due");
 
-    const titles = await page.locator(TODO_TITLE).allTextContents();
-    const highIdx = titles.findIndex((t: string) => t.includes("High"));
-    const midIdx = titles.findIndex((t: string) => t.includes("Mid"));
-    const lowIdx = titles.findIndex((t: string) => t.includes("Low"));
-
-    expect(highIdx).toBeLessThan(midIdx);
-    expect(midIdx).toBeLessThan(lowIdx);
+    // 升序：越近的截止时间越靠前 → Soon, Mid, Later
+    await expect(page.locator(TODO_TITLE).nth(0)).toContainText("Soon");
+    await expect(page.locator(TODO_TITLE).nth(1)).toContainText("Mid");
+    await expect(page.locator(TODO_TITLE).nth(2)).toContainText("Later");
   });
 });
 
@@ -97,9 +95,9 @@ test.describe("Tag Filter", () => {
   test("tag filter pills clickable and filter todos", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Work task", tag: "工作", level: "low" },
-        { title: "Personal task", tag: "个人", level: "low" },
-        { title: "Another work", tag: "工作", level: "low" },
+        { title: "Work task", tag: "工作" },
+        { title: "Personal task", tag: "个人" },
+        { title: "Another work", tag: "工作" },
       ],
     });
     await page.goto("/");
@@ -117,8 +115,8 @@ test.describe("Tag Filter", () => {
   test("click active tag filter again clears it", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Work task", tag: "工作", level: "low" },
-        { title: "Personal task", tag: "个人", level: "low" },
+        { title: "Work task", tag: "工作" },
+        { title: "Personal task", tag: "个人" },
       ],
     });
     await page.goto("/");
@@ -136,7 +134,7 @@ test.describe("Tag Filter", () => {
 test.describe("Undo", () => {
   test("undo complete via toast button", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Undoable task", level: "low" }],
+      seed: [{ title: "Undoable task" }],
     });
     await page.goto("/");
 
@@ -151,7 +149,7 @@ test.describe("Undo", () => {
 
   test("undo delete via toast button", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Restorable", level: "low" }],
+      seed: [{ title: "Restorable" }],
     });
     await page.goto("/");
 
@@ -168,7 +166,7 @@ test.describe("Undo", () => {
 
   test("undo toast close button dismisses it", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Test", level: "low" }],
+      seed: [{ title: "Test" }],
     });
     await page.goto("/");
 
@@ -181,7 +179,7 @@ test.describe("Undo", () => {
 
   test("undo toast auto-dismissed after timeout", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Auto dismiss", level: "low" }],
+      seed: [{ title: "Auto dismiss" }],
     });
     await page.goto("/");
 
@@ -197,8 +195,8 @@ test.describe("Batch Operations", () => {
   test("selecting todos shows batch bar", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Task 1", level: "low" },
-        { title: "Task 2", level: "low" },
+        { title: "Task 1" },
+        { title: "Task 2" },
       ],
     });
     await page.goto("/");
@@ -214,9 +212,9 @@ test.describe("Batch Operations", () => {
   test("batch complete selected todos", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Batch A", level: "low" },
-        { title: "Batch B", level: "low" },
-        { title: "Batch C", level: "low" },
+        { title: "Batch A" },
+        { title: "Batch B" },
+        { title: "Batch C" },
       ],
     });
     await page.goto("/");
@@ -236,9 +234,9 @@ test.describe("Batch Operations", () => {
   test("batch delete removes selected todos", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Delete A", level: "low" },
-        { title: "Keep", level: "low" },
-        { title: "Delete B", level: "low" },
+        { title: "Delete A" },
+        { title: "Keep" },
+        { title: "Delete B" },
       ],
     });
     await page.goto("/");

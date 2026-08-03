@@ -65,8 +65,8 @@ test.describe("Drag and Drop", () => {
   test("drag handles visible when sorted by custom order", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "First", order: 0, level: "low" },
-        { title: "Second", order: 1, level: "low" },
+        { title: "First", order: 0 },
+        { title: "Second", order: 1 },
       ],
     });
     await page.goto("/");
@@ -80,9 +80,9 @@ test.describe("Drag and Drop", () => {
   test("reorder by drag and drop changes order", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Item A", order: 0, level: "low" },
-        { title: "Item B", order: 1, level: "low" },
-        { title: "Item C", order: 2, level: "low" },
+        { title: "Item A", order: 0 },
+        { title: "Item B", order: 1 },
+        { title: "Item C", order: 2 },
       ],
     });
     await page.goto("/");
@@ -111,8 +111,8 @@ test.describe("Drag and Drop", () => {
   test("drag over shows visual indicator during drag", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Source", order: 0, level: "low" },
-        { title: "Target", order: 1, level: "low" },
+        { title: "Source", order: 0 },
+        { title: "Target", order: 1 },
       ],
     });
     await page.goto("/");
@@ -139,8 +139,8 @@ test.describe("Drag and Drop", () => {
   test("drag not available when not sorted by order", async ({ page }) => {
     await setupPage(page, {
       seed: [
-        { title: "Task 1", order: 0, level: "low" },
-        { title: "Task 2", order: 1, level: "low" },
+        { title: "Task 1", order: 0 },
+        { title: "Task 2", order: 1 },
       ],
     });
     await page.goto("/");

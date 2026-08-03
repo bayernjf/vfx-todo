@@ -28,7 +28,7 @@ test.describe("Todo CRUD", () => {
     await setupPage(page);
     await page.goto("/");
 
-    await expect(page.locator(".badge")).toHaveText("vfx-todo");
+    await expect(page.locator(".app-title")).toHaveText("VFX Todo");
     await expect(page.locator(".counter")).toBeVisible();
   });
 
@@ -100,7 +100,7 @@ test.describe("Todo CRUD", () => {
 
   test("complete a todo shows completed state", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Test task", level: "low" }],
+      seed: [{ title: "Test task" }],
     });
     await page.goto("/");
 
@@ -113,7 +113,7 @@ test.describe("Todo CRUD", () => {
 
   test("delete a todo removes it", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Delete me", level: "low" }],
+      seed: [{ title: "Delete me" }],
     });
     await page.goto("/");
 
@@ -128,9 +128,9 @@ test.describe("Todo CRUD", () => {
     await setupPage(page);
     await page.goto("/");
 
-    // Select a tag from dropdown (4th select in the form)
+    // Select a tag from dropdown (3rd select in the form)
     const tagSelects = page.locator(".todo-input select");
-    const tagSelect = tagSelects.nth(3);
+    const tagSelect = tagSelects.nth(2);
     await tagSelect.selectOption("工作");
 
     const input = page.locator(TITLE_INPUT);
@@ -145,7 +145,7 @@ test.describe("Todo CRUD", () => {
 test.describe("Edit Mode", () => {
   test("clicking edit opens inline edit form", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Editable task", level: "low" }],
+      seed: [{ title: "Editable task" }],
     });
     await page.goto("/");
 
@@ -157,7 +157,7 @@ test.describe("Edit Mode", () => {
 
   test("edit and save todo title", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Original title", level: "low" }],
+      seed: [{ title: "Original title" }],
     });
     await page.goto("/");
 
@@ -173,7 +173,7 @@ test.describe("Edit Mode", () => {
 
   test("cancel edit preserves original title", async ({ page }) => {
     await setupPage(page, {
-      seed: [{ title: "Keep me", level: "low" }],
+      seed: [{ title: "Keep me" }],
     });
     await page.goto("/");
 

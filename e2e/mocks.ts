@@ -6,10 +6,10 @@
 
 export interface MockTodo {
   title: string;
-  level: "low" | "mid" | "high";
   tag?: string;
   due_time?: number;
   screen?: number;
+  effect?: string;
 }
 
 export interface MockPreferences {
@@ -40,7 +40,6 @@ function makeTodo(t: any, i = 0): any {
   return {
     id: t.id || `id-${i}-${t.title}`,
     title: t.title,
-    level: t.level || "low",
     completed: t.completed ?? false,
     created_at: t.created_at ?? Date.now() - (i + 1) * 60000,
     due_at: t.due_at ?? t.due_time ?? null,
@@ -49,6 +48,9 @@ function makeTodo(t: any, i = 0): any {
     effect: t.effect ?? null,
     tag: t.tag ?? null,
     order: t.order ?? 0,
+    repeat_count: t.repeat_count ?? 1,
+    play_duration: t.play_duration ?? 2,
+    danmaku_speed: t.danmaku_speed ?? 120,
   };
 }
 
@@ -78,7 +80,6 @@ export function getTauriMockScript(screens: MockScreen[] = DEFAULT_SCREENS): str
           const todo = {
             id: "id-" + Math.random().toString(36).slice(2),
             title: args.title,
-            level: args.level || "low",
             completed: false,
             created_at: Date.now(),
             due_at: args.dueAt ?? null,
@@ -87,6 +88,9 @@ export function getTauriMockScript(screens: MockScreen[] = DEFAULT_SCREENS): str
             effect: args.effect ?? null,
             tag: args.tag ?? null,
             order: 0,
+            repeat_count: args.repeatCount ?? 1,
+            play_duration: args.playDuration ?? 2,
+            danmaku_speed: args.danmakuSpeed ?? 120,
           };
           window.__STORE__.todos.push(todo);
           return todo;
@@ -108,13 +112,15 @@ export function getTauriMockScript(screens: MockScreen[] = DEFAULT_SCREENS): str
               ? {
                   ...td,
                   title: args.title ?? td.title,
-                  level: args.level ?? td.level,
                   tag: args.tag ?? td.tag,
                   due_at: args.due_at ?? td.due_at,
                   recurrence: args.recurrence ?? td.recurrence,
                   screen: args.screen ?? td.screen,
                   completed: args.completed ?? td.completed,
                   effect: args.effect ?? td.effect,
+                  repeat_count: args.repeat_count ?? td.repeat_count ?? 1,
+                  play_duration: args.play_duration ?? td.play_duration ?? 2,
+                  danmaku_speed: args.danmaku_speed ?? td.danmaku_speed ?? 120,
                 }
               : td
           );
@@ -214,7 +220,6 @@ export async function setupPage(
       const seedTodos = (data.seed || []).map((t: any, i: number) => ({
         id: `id-${i}-${t.title}`,
         title: t.title,
-        level: t.level,
         completed: false,
         created_at: Date.now() - (data.seed.length - i) * 60000,
         due_at: t.due_time ?? null,

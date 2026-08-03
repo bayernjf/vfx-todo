@@ -23,7 +23,7 @@ test.describe("Multi-Screen Support", () => {
     );
 
     // Create-form screen <select> should expose 3 options
-    const screenSelect = page.locator(".todo-input select").nth(2);
+    const screenSelect = page.locator(".todo-input select").nth(1);
     await expect(screenSelect).toBeVisible();
     await expect(screenSelect.locator("option")).toHaveCount(3);
   });
@@ -32,7 +32,7 @@ test.describe("Multi-Screen Support", () => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
 
-    await page.locator(".todo-input select").nth(2).selectOption({ label: "屏 2" });
+    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 2" });
 
     await page.locator(TITLE_INPUT).fill("Screen-bound task");
     await page.locator(ADD_BUTTON).click();
@@ -50,8 +50,9 @@ test.describe("Multi-Screen Support", () => {
   test("sending danmaku routes to the selected screen", async ({ page }) => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
+    await page.locator(".debug-toggle").click();
 
-    await page.locator(".todo-input select").nth(2).selectOption({ label: "屏 2" });
+    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 2" });
     await page.locator('.danmaku-bar input[placeholder="直接发弹幕..."]').fill("hello multi-screen");
 
     await page.locator('.danmaku-bar button:has-text("发送")').click();
@@ -65,8 +66,9 @@ test.describe("Multi-Screen Support", () => {
   test("preview effect routes to the selected screen", async ({ page }) => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
+    await page.locator(".debug-toggle").click();
 
-    await page.locator(".todo-input select").nth(2).selectOption({ label: "屏 3" });
+    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 3" });
     // First effect-demo button (EFFECT_LABEL order) previews that effect
     await page.locator(".effect-demo-btn").first().click();
     await page.waitForTimeout(150);
@@ -79,15 +81,15 @@ test.describe("Multi-Screen Support", () => {
   test("editing a todo can reassign its screen", async ({ page }) => {
     await setupPage(page, {
       screens: THREE_SCREENS,
-      seed: [{ title: "Reassign me", level: "low", tag: "work" }],
+      seed: [{ title: "Reassign me", tag: "work" }],
     });
     await page.goto("/");
 
     await page.locator(EDIT_BTN).first().click();
     await page.waitForTimeout(100);
 
-    // 4th select in the edit form is the screen selector
-    const editScreen = page.locator(".edit-form select").nth(3);
+    // 3rd select in the edit form is the screen selector
+    const editScreen = page.locator(".edit-form select").nth(2);
     await editScreen.selectOption({ label: "屏 2" });
 
     await page.locator(SAVE_BTN).first().click();
