@@ -1,12 +1,63 @@
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+// ══════════════════════════════════════════
+// 错误边界
+// ══════════════════════════════════════════
 
-type Level = "low" | "mid" | "high";
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
 
-// 与后端 VFX_EFFECTS 保持一致
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("ErrorBoundary caught:", error, info);
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary" data-testid="error-boundary">
+          <h2>出错了</h2>
+          <p className="error-message">
+            {this.state.error?.message || "未知错误"}
+          </p>
+          <button
+            className="error-retry-btn"
+            onClick={this.handleRetry}
+            data-testid="error-retry"
+          >
+            重试
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// 与后端 VFX_EFFECTS 保持一致（danmaku 排第一）
 type EffectType =
+  | "danmaku"
   | "shatter"
   | "particle"
   | "rain"
@@ -21,7 +72,6 @@ type TagType = "工作" | "生活" | "紧急";
 interface Todo {
   id: string;
   title: string;
-  level: Level;
   completed: boolean;
   created_at: number;
   due_at: number | null;
@@ -30,6 +80,9 @@ interface Todo {
   effect?: EffectType | null;
   tag?: TagType | null;
   order?: number;
+  repeat_count?: number;
+  play_duration?: number;
+  danmaku_speed?: number;
 }
 
 interface ScreenInfo {
@@ -40,23 +93,11 @@ interface ScreenInfo {
 
 interface Preferences {
   default_screen: number;
-  default_level: string;
   theme?: string;
 }
 
-const LEVEL_LABEL: Record<Level, string> = {
-  low: "弹幕",
-  mid: "粒子",
-  high: "破碎",
-};
-
-const LEVEL_COLOR: Record<Level, string> = {
-  low: "#4ecdc4",
-  mid: "#ffe66d",
-  high: "#ff6b6b",
-};
-
 const EFFECT_LABEL: Record<EffectType, string> = {
+  danmaku: "弹幕",
   shatter: "破碎",
   particle: "粒子",
   rain: "雨",
@@ -67,6 +108,7 @@ const EFFECT_LABEL: Record<EffectType, string> = {
 };
 
 const EFFECT_COLOR: Record<EffectType, string> = {
+  danmaku: "#ff6b6b",
   shatter: "#ff6b6b",
   particle: "#ffe66d",
   rain: "#88c0ff",
@@ -74,6 +116,22 @@ const EFFECT_COLOR: Record<EffectType, string> = {
   ripple: "#4ecdc4",
   laser: "#ff006e",
   glitch: "#c77dff",
+};
+
+const EFFECT_COLOR_LIGHT: Record<EffectType, string> = {
+  danmaku: "#d63a3a",
+  shatter: "#d63a3a",
+  particle: "#a07a00",
+  rain: "#2f6fb0",
+  firework: "#c47a00",
+  ripple: "#0e8e85",
+  laser: "#c20056",
+  glitch: "#9b3fbf",
+};
+const TAG_COLOR_LIGHT: Record<TagType, string> = {
+  工作: "#d63a3a",
+  生活: "#0e8e85",
+  紧急: "#a07a00",
 };
 
 const TAGS: TagType[] = ["工作", "生活", "紧急"];
@@ -84,10 +142,11 @@ const TAG_COLOR: Record<TagType, string> = {
   紧急: "#f9ca24",
 };
 
-const DUE_PRESETS: { label: string; mins: number }[] = [
-  { label: "+1m", mins: 1 },
-  { label: "+5m", mins: 5 },
-  { label: "+30m", mins: 30 },
+const DUE_PRESETS: { label: string; secs: number }[] = [
+  { label: "+3s", secs: 3 },
+  { label: "+1m", secs: 60 },
+  { label: "+5m", secs: 300 },
+  { label: "+30m", secs: 1800 },
 ];
 
 // ══════════════════════════════════════════
@@ -116,8 +175,50 @@ function formatDateTime(ts: number | null): string {
   });
 }
 
-function addMins(mins: number): number {
-  return Date.now() + mins * 60_000;
+function addSecs(secs: number): number {
+  return Date.now() + secs * 1000;
+}
+
+// 本地时区的 YYYY-MM-DD（用于 date 输入）
+function todayDateString(): string {
+  const d = new Date();
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 10);
+}
+
+// 当前本地时间 HH:mm（用于 time 输入的 min）
+function timeStringNow(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// 默认到期时间 = 当前时间 + 1 小时
+function defaultDueTimeString(): string {
+  const d = new Date();
+  d.setHours(d.getHours() + 1);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// 默认到期日期（处理 +1h 后跨天的情况）
+function defaultDueDateString(): string {
+  const d = new Date();
+  d.setHours(d.getHours() + 1);
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 10);
+}
+
+// 校验日期+时间不能比当前早；若过期则退回到默认 now+1h
+function validateDueDateTime(dateStr: string, timeStr: string): { date: string; time: string } {
+  const due = new Date(`${dateStr}T${timeStr}`).getTime();
+  if (due > Date.now()) return { date: dateStr, time: timeStr };
+  return { date: defaultDueDateString(), time: defaultDueTimeString() };
+}
+
+// 时间戳 → 本地时区的 YYYY-MM-DDTHH:mm（用于自定义到期时间输入）
+function formatLocalDT(ts: number): string {
+  const d = new Date(ts);
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 16);
 }
 
 // ══════════════════════════════════════════
@@ -126,14 +227,16 @@ function addMins(mins: number): number {
 
 interface EditState {
   title: string;
-  level: Level;
   dueAt: number | null;
   duePreset: number | null; // mins
   customDue: string; // datetime-local value
   screen: number;
   recurrence: string | null;
-  effect: EffectType | "";
+  effect: EffectType;
   tag: TagType | "";
+  repeatCount: number;
+  playDuration: number;
+  danmakuSpeed: number;
 }
 
 function EditForm({
@@ -149,6 +252,23 @@ function EditForm({
   onCancel: () => void;
   onChange: (patch: Partial<EditState>) => void;
 }) {
+  const [customDate, setCustomDate] = useState(
+    edit.customDue ? edit.customDue.slice(0, 10) : defaultDueDateString()
+  );
+  const [customTime, setCustomTime] = useState(
+    edit.customDue ? edit.customDue.slice(11, 16) : defaultDueTimeString()
+  );
+  const customDateRef = useRef<HTMLInputElement>(null);
+  const customTimeRef = useRef<HTMLInputElement>(null);
+  const commitCustom = () => {
+    const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+    const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+    const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+    setCustomDate(d);
+    setCustomTime(t);
+    const full = `${d}T${t}`;
+    onChange({ customDue: full, dueAt: new Date(full).getTime(), duePreset: null });
+  };
   return (
     <div className="edit-form">
       <input
@@ -161,18 +281,9 @@ function EditForm({
       />
       <div className="edit-row">
         <select
-          value={edit.level}
-          onChange={(e) => onChange({ level: e.target.value as Level })}
-        >
-          <option value="low">弹幕</option>
-          <option value="mid">粒子</option>
-          <option value="high">破碎</option>
-        </select>
-        <select
           value={edit.effect}
-          onChange={(e) => onChange({ effect: e.target.value as EffectType | "" })}
+          onChange={(e) => onChange({ effect: e.target.value as EffectType })}
         >
-          <option value="">默认（按 level）</option>
           {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
             <option key={k} value={k}>{EFFECT_LABEL[k]}</option>
           ))}
@@ -201,12 +312,12 @@ function EditForm({
         <span className="due-label">到期：</span>
         {DUE_PRESETS.map((p) => (
           <button
-            key={p.mins}
-            className={`due-btn ${edit.duePreset === p.mins ? "active" : ""}`}
+            key={p.secs}
+            className={`due-btn ${edit.duePreset === p.secs ? "active" : ""}`}
             onClick={() =>
               onChange({
-                duePreset: edit.duePreset === p.mins ? null : p.mins,
-                dueAt: edit.duePreset === p.mins ? null : addMins(p.mins),
+                duePreset: edit.duePreset === p.secs ? null : p.secs,
+                dueAt: edit.duePreset === p.secs ? null : addSecs(p.secs),
                 customDue: "",
               })
             }
@@ -214,19 +325,128 @@ function EditForm({
             {p.label}
           </button>
         ))}
-        <input
-          type="datetime-local"
-          className="due-datetime"
-          value={edit.customDue}
-          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-            .toISOString()
-            .slice(0, 16)}
-          onChange={(e) => {
-            const val = e.target.value;
-            const ts = val ? new Date(val).getTime() : null;
-            onChange({ customDue: val, dueAt: ts, duePreset: null });
-          }}
-        />
+        <span className="due-datetime-group">
+          <input
+            ref={customDateRef}
+            type="date"
+            className="due-datetime"
+            value={customDate}
+            min={todayDateString()}
+            onFocus={() => {
+              if (!edit.customDue) {
+                const d = defaultDueDateString();
+                setCustomDate(d);
+                if (customDateRef.current) customDateRef.current.value = d;
+              }
+            }}
+            onChange={(e) => setCustomDate(e.target.value)}
+            onBlur={commitCustom}
+          />
+          <input
+            ref={customTimeRef}
+            type="time"
+            className="due-datetime"
+            value={customTime}
+            min={customDate === todayDateString() ? timeStringNow() : undefined}
+            onFocus={() => {
+              if (!edit.customDue) {
+                const t = defaultDueTimeString();
+                setCustomTime(t);
+                if (customTimeRef.current) customTimeRef.current.value = t;
+              }
+            }}
+            onChange={(e) => setCustomTime(e.target.value)}
+            onBlur={commitCustom}
+          />
+          <button
+            type="button"
+            className="due-btn"
+            onClick={commitCustom}
+          >
+            确认
+          </button>
+        </span>
+        <span className="due-label">播放次数：</span>
+        {[1, 2, 3].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${edit.repeatCount === n ? "active" : ""}`}
+            onClick={() => onChange({ repeatCount: n })}
+          >
+            {n}
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={edit.repeatCount <= 1}
+            onClick={() => onChange({ repeatCount: Math.max(1, edit.repeatCount - 1) })}
+          >
+            −
+          </button>
+          <span className="repeat-count">{edit.repeatCount}</span>
+          <button
+            className="due-btn"
+            disabled={edit.repeatCount >= 10}
+            onClick={() => onChange({ repeatCount: Math.min(10, edit.repeatCount + 1) })}
+          >
+            +
+          </button>
+        </span>
+        <span className="due-label">播放时长（非弹幕）：</span>
+        {[1, 2, 3].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${edit.playDuration === n ? "active" : ""}`}
+            onClick={() => onChange({ playDuration: n })}
+          >
+            {n}s
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={edit.playDuration <= 1}
+            onClick={() => onChange({ playDuration: Math.max(1, edit.playDuration - 1) })}
+          >
+            −
+          </button>
+          <span className="repeat-count">{edit.playDuration}s</span>
+          <button
+            className="due-btn"
+            disabled={edit.playDuration >= 5}
+            onClick={() => onChange({ playDuration: Math.min(5, edit.playDuration + 1) })}
+          >
+            +
+          </button>
+        </span>
+        <span className="due-label">弹幕速度：</span>
+        {[80, 120, 180].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${edit.danmakuSpeed === n ? "active" : ""}`}
+            onClick={() => onChange({ danmakuSpeed: n })}
+          >
+            {n === 80 ? "慢" : n === 120 ? "正常" : "快"}
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={edit.danmakuSpeed <= 50}
+            onClick={() => onChange({ danmakuSpeed: Math.max(50, edit.danmakuSpeed - 10) })}
+          >
+            −
+          </button>
+          <span className="repeat-count">{edit.danmakuSpeed}</span>
+          <button
+            className="due-btn"
+            disabled={edit.danmakuSpeed >= 250}
+            onClick={() => onChange({ danmakuSpeed: Math.min(250, edit.danmakuSpeed + 10) })}
+          >
+            +
+          </button>
+        </span>
         <span className="due-label">重复：</span>
         {[
           { value: null, label: "不重复" },
@@ -269,6 +489,7 @@ function TodoItem({
   onDrop,
   onDragEnd,
   sortBy,
+  isLight,
 }: {
   todo: Todo;
   screens: ScreenInfo[];
@@ -284,8 +505,11 @@ function TodoItem({
   onDrop: (e: React.DragEvent, id: string) => void;
   onDragEnd: () => void;
   sortBy: string;
-}) {
+  isLight: boolean;
+  }) {
   const [, setTick] = useState(0);
+  const ec = isLight ? EFFECT_COLOR_LIGHT : EFFECT_COLOR;
+  const tc = isLight ? TAG_COLOR_LIGHT : TAG_COLOR;
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
@@ -297,23 +521,23 @@ function TodoItem({
   // 编辑态 → 展示内联表单
   if (editing) {
     const editFromTodo = (): EditState => {
-      const hasPreset = todo.due_at && DUE_PRESETS.some((p) => todo.due_at! <= Date.now() + p.mins * 60000 + 5000 && todo.due_at! >= Date.now() + p.mins * 60000 - 5000);
+      const hasPreset = todo.due_at && DUE_PRESETS.some((p) => todo.due_at! <= Date.now() + p.secs * 60000 + 5000 && todo.due_at! >= Date.now() + p.secs * 60000 - 5000);
       return {
         title: todo.title,
-        level: todo.level,
         dueAt: todo.due_at,
         duePreset: hasPreset
           ? DUE_PRESETS.find(
-              (p) => Math.abs(todo.due_at! - (Date.now() + p.mins * 60000)) < 10000
-            )?.mins ?? null
+              (p) => Math.abs(todo.due_at! - (Date.now() + p.secs * 1000)) < 10000
+            )?.secs ?? null
           : null,
-        customDue: todo.due_at
-          ? new Date(todo.due_at).toISOString().slice(0, 16)
-          : "",
+        customDue: todo.due_at ? formatLocalDT(todo.due_at) : "",
         screen: todo.screen ?? 0,
         recurrence: todo.recurrence ?? null,
-        effect: todo.effect ?? "",
+        effect: todo.effect ?? "danmaku",
         tag: todo.tag ?? "",
+        repeatCount: todo.repeat_count ?? 1,
+        playDuration: todo.play_duration ?? 2,
+        danmakuSpeed: todo.danmaku_speed ?? 120,
       };
     };
 
@@ -327,12 +551,14 @@ function TodoItem({
           onSave={() => {
             const patch: Record<string, unknown> = {};
             if (edit.title !== todo.title) patch.title = edit.title;
-            if (edit.level !== todo.level) patch.level = edit.level;
             if (edit.dueAt !== todo.due_at) patch.due_at = edit.dueAt;
             if (edit.screen !== (todo.screen ?? 0)) patch.screen = edit.screen;
             if (edit.recurrence !== (todo.recurrence ?? null)) patch.recurrence = edit.recurrence;
-            if (edit.effect !== (todo.effect ?? "")) patch.effect = edit.effect || null;
+            if (edit.effect !== (todo.effect ?? "danmaku")) patch.effect = edit.effect;
             if (edit.tag !== (todo.tag ?? "")) patch.tag = edit.tag || null;
+            if (edit.repeatCount !== (todo.repeat_count ?? 1)) patch.repeat_count = edit.repeatCount;
+            if (edit.playDuration !== (todo.play_duration ?? 2)) patch.play_duration = edit.playDuration;
+            if (edit.danmakuSpeed !== (todo.danmaku_speed ?? 120)) patch.danmaku_speed = edit.danmakuSpeed;
             if (Object.keys(patch).length > 0) {
               onUpdate(todo.id, patch);
             }
@@ -367,12 +593,6 @@ function TodoItem({
         onChange={() => onToggleSelect(todo.id)}
         onClick={(e) => e.stopPropagation()}
       />
-      <span
-        className="todo-level"
-        style={{ color: LEVEL_COLOR[todo.level], borderColor: LEVEL_COLOR[todo.level] }}
-      >
-        {LEVEL_LABEL[todo.level]}
-      </span>
       <div className="todo-content">
         <span
           className="todo-title"
@@ -384,23 +604,21 @@ function TodoItem({
               {todo.recurrence === "daily" ? "每天" : "每周"}
             </span>
           )}
-          {todo.effect && (
-            <span
-              className="effect-badge"
-              style={{
-                color: EFFECT_COLOR[todo.effect],
-                borderColor: EFFECT_COLOR[todo.effect],
-              }}
-              title={`特效：${EFFECT_LABEL[todo.effect]}`}
-            >
-              {EFFECT_LABEL[todo.effect]}
-            </span>
-          )}
+          <span
+            className="effect-badge"
+            style={{
+              color: ec[todo.effect ?? "danmaku"],
+              borderColor: ec[todo.effect ?? "danmaku"],
+            }}
+            title={`特效：${EFFECT_LABEL[todo.effect ?? "danmaku"]}`}
+          >
+            {EFFECT_LABEL[todo.effect ?? "danmaku"]}
+          </span>
           {todo.tag && (
             <span
               className="tag-badge"
               style={{
-                backgroundColor: TAG_COLOR[todo.tag],
+                backgroundColor: tc[todo.tag],
               }}
             >
               {todo.tag}
@@ -437,17 +655,26 @@ function TodoItem({
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
-  const [level, setLevel] = useState<Level>("low");
-  const [dueInMin, setDueInMin] = useState<number | null>(null);
+  const [dueInSecs, setDueInSecs] = useState<number | null>(300);
   const [customDue, setCustomDue] = useState("");
+  const [customDate, setCustomDate] = useState(defaultDueDateString());
+  const [customTime, setCustomTime] = useState(defaultDueTimeString());
+  const customDateRef = useRef<HTMLInputElement>(null);
+  const customTimeRef = useRef<HTMLInputElement>(null);
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
   const [targetScreen, setTargetScreen] = useState(0);
   const [recurrence, setRecurrence] = useState<string | null>(null);
-  const [effect, setEffect] = useState<EffectType | "">("");
+  const [repeatCount, setRepeatCount] = useState(1);
+  const [playDuration, setPlayDuration] = useState(2);
+  const [danmakuSpeed, setDanmakuSpeed] = useState(120);
+  const [effect, setEffect] = useState<EffectType>("danmaku");
   const [filterTag, setFilterTag] = useState<TagType | "">("");
   const [newTag, setNewTag] = useState<TagType | "">("");
+
+  // 特效演示区（特效演示 + 弹幕）默认折叠，降低底部信息密度
+  const [debugOpen, setDebugOpen] = useState(false);
 
   // Feature 3: 搜索
   const [searchQuery, setSearchQuery] = useState("");
@@ -456,7 +683,7 @@ function App() {
   const [showCompleted, setShowCompleted] = useState(true);
 
   // Feature 6: 排序
-  const [sortBy, setSortBy] = useState<"created" | "due" | "level" | "order">("created");
+  const [sortBy, setSortBy] = useState<"created" | "due" | "order">("created");
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   // Feature 8: 批量选中
@@ -523,7 +750,6 @@ function App() {
           for (const s of snaps) {
             await invoke<Todo>("todo_create", {
               title: s.title,
-              level: s.level,
               dueAt: s.due_at,
               screen: s.screen ?? 0,
               recurrence: s.recurrence ?? null,
@@ -546,7 +772,6 @@ function App() {
   // Feature 5: 加载偏好设置
   const [prefs, setPrefs] = useState<Preferences>({
     default_screen: 0,
-    default_level: "high",
   });
 
   // 主题：system / dark / light
@@ -557,7 +782,6 @@ function App() {
     invoke<Preferences>("load_prefs")
       .then((p) => {
         setPrefs(p);
-        setLevel(p.default_level as Level);
         setTargetScreen(p.default_screen);
         if (p.theme === "dark" || p.theme === "light") {
           setTheme(p.theme);
@@ -575,6 +799,21 @@ function App() {
       el.setAttribute("data-theme", theme);
     }
   }, [theme]);
+
+  // 检测系统是否处于浅色模式（theme=system 时需要前端同步选色）
+  const [prefersLight, setPrefersLight] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    setPrefersLight(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setPrefersLight(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const isLight = theme === "light" || (theme === "system" && prefersLight);
+
+  // 当前主题下使用的色板
+  const ec = isLight ? EFFECT_COLOR_LIGHT : EFFECT_COLOR;
+  const tc = isLight ? TAG_COLOR_LIGHT : TAG_COLOR;
 
   // Undo toast auto-dismiss after 3s
   useEffect(() => {
@@ -602,25 +841,34 @@ function App() {
     let dueAt: number | null = null;
     if (customDue) {
       dueAt = new Date(customDue).getTime();
-    } else if (dueInMin !== null) {
-      dueAt = Date.now() + dueInMin * 60_000;
+    } else if (dueInSecs !== null) {
+      dueAt = Date.now() + dueInSecs * 1000;
     }
     const todo = await invoke<Todo>("todo_create", {
       title,
-      level,
       dueAt,
       screen: targetScreen,
       recurrence,
-      effect: effect || null,
+      effect,
       tag: newTag || null,
+      repeatCount,
+      playDuration,
+      danmakuSpeed,
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
-    setDueInMin(null);
+    setDueInSecs(300); // 维持默认时长，下次新建仍带 5 分钟到期
     setCustomDue("");
+    setCustomDate(defaultDueDateString());
+    setCustomTime(defaultDueTimeString());
+    if (customDateRef.current) customDateRef.current.value = defaultDueDateString();
+    if (customTimeRef.current) customTimeRef.current.value = defaultDueTimeString();
     setRecurrence(null);
-    setEffect("");
+    setEffect("danmaku");
     setNewTag("");
+    setRepeatCount(1);
+    setPlayDuration(2);
+    setDanmakuSpeed(120);
   };
 
   const completeTodo = async (id: string) => {
@@ -652,7 +900,6 @@ function App() {
         revert: async () => {
           await invoke<Todo>("todo_create", {
             title: snap.title,
-            level: snap.level,
             dueAt: snap.due_at,
             screen: snap.screen ?? 0,
             recurrence: snap.recurrence ?? null,
@@ -760,7 +1007,7 @@ function App() {
   };
 
   const previewEffect = (e: EffectType) => {
-    invoke("trigger_vfx", { effect: e, level, screen: targetScreen }).catch(console.error);
+    invoke("trigger_vfx", { effect: e, screen: targetScreen }).catch(console.error);
   };
 
   const handleExport = async (format: "json" | "csv") => {
@@ -795,12 +1042,6 @@ function App() {
           if (!a.due_at) return 1;
           if (!b.due_at) return -1;
           return a.due_at - b.due_at;
-        case "level": {
-          const w = { high: 0, mid: 1, low: 2 };
-          const wa = w[a.level] ?? 99;
-          const wb = w[b.level] ?? 99;
-          return wa - wb || b.created_at - a.created_at;
-        }
         case "order":
           return (a.order ?? 0) - (b.order ?? 0);
         default: // created
@@ -812,10 +1053,13 @@ function App() {
   const completedCount = todos.filter((t) => t.completed).length;
 
   return (
+    <ErrorBoundary>
     <div className="console">
       <header className="console-header">
-        <span className="badge">vfx-todo</span>
-        <span className="counter">{activeCount} 待办 · {completedCount} 已完成</span>
+        <div className="header-title">
+          <span className="app-title">VFX Todo</span>
+          <span className="counter">{activeCount} 待办 · {completedCount} 已完成</span>
+        </div>
         <div className="header-actions">
           <button
             className="icon-btn theme-toggle"
@@ -824,12 +1068,12 @@ function App() {
               setTheme(next);
               savePrefs({ ...prefs, theme: next });
             }}
-            title={`主题：${theme === "dark" ? "深色" : theme === "light" ? "亮色" : "跟随系统"}`}
+            title={`主题：${theme === "dark" ? "当前深色" : theme === "light" ? "当前亮色" : "当前跟随系统"} · 点击切换`}
           >
-            {theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "💻"}
+            {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
           </button>
-          <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">⬇️</button>
-          <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">⬆️</button>
+          <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">↓</button>
+          <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">↑</button>
         </div>
       </header>
 
@@ -861,9 +1105,9 @@ function App() {
             key={t}
             className={`tag-filter-pill ${filterTag === t ? "active" : ""}`}
             style={{
-              borderColor: TAG_COLOR[t],
-              color: filterTag === t ? "#fff" : TAG_COLOR[t],
-              backgroundColor: filterTag === t ? TAG_COLOR[t] : "transparent",
+              borderColor: tc[t],
+              color: filterTag === t ? "var(--on-accent)" : tc[t],
+              backgroundColor: filterTag === t ? tc[t] : "transparent",
             }}
             onClick={() => setFilterTag(filterTag === t ? "" : t)}
           >
@@ -885,11 +1129,10 @@ function App() {
         <select
           className="sort-select"
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as "created" | "due" | "level" | "order")}
+          onChange={(e) => setSortBy(e.target.value as "created" | "due" | "order")}
         >
           <option value="created">按创建时间</option>
           <option value="due">按到期时间</option>
-          <option value="level">按等级</option>
           <option value="order">手动排序</option>
         </select>
         {completedCount > 0 && (
@@ -922,6 +1165,7 @@ function App() {
             <TodoItem
               key={todo.id}
               todo={todo}
+              isLight={isLight}
               screens={screens}
               onComplete={completeTodo}
               onDelete={deleteTodo}
@@ -941,21 +1185,15 @@ function App() {
       </div>
 
       <div className="todo-input">
-        <select value={level} onChange={(e) => {
-          const l = e.target.value as Level;
-          setLevel(l);
-          savePrefs({ ...prefs, default_level: l });
-        }}>
-          <option value="low">弹幕</option>
-          <option value="mid">粒子</option>
-          <option value="high">破碎</option>
-        </select>
         <select
           value={effect}
-          onChange={(e) => setEffect(e.target.value as EffectType | "")}
-          title="选择具体特效（覆盖 level 默认派发）"
+          onChange={(e) => {
+            const v = e.target.value as EffectType;
+            setEffect(v);
+            invoke("set_current_effect", { effect: v }).catch(console.error);
+          }}
+          title="选择默认特效，快捷键 ⌘⇧2/3/4 将触发此特效"
         >
-          <option value="">默认（按 level）</option>
           {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
             <option key={k} value={k}>
               {EFFECT_LABEL[k]}
@@ -997,33 +1235,175 @@ function App() {
         <span className="due-label">到期提醒：</span>
         {DUE_PRESETS.map((p) => (
           <button
-            key={p.mins}
-            className={`due-btn ${dueInMin === p.mins ? "active" : ""}`}
+            key={p.secs}
+            className={`due-btn ${dueInSecs === p.secs ? "active" : ""}`}
             onClick={() => {
-              setDueInMin(dueInMin === p.mins ? null : p.mins);
+              setDueInSecs(dueInSecs === p.secs ? null : p.secs);
               setCustomDue("");
             }}
           >
             {p.label}
           </button>
         ))}
-        <input
-          type="datetime-local"
-          className="due-datetime"
-          value={customDue}
-          min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
-          onChange={(e) => {
-            setCustomDue(e.target.value);
-            setDueInMin(null);
-          }}
-        />
-        {(dueInMin !== null || customDue) && (
+        <span className="due-datetime-group">
+          <input
+            ref={customDateRef}
+            type="date"
+            className="due-datetime"
+            value={customDate}
+            min={todayDateString()}
+            onFocus={() => {
+              if (!customDue) {
+                const d = defaultDueDateString();
+                setCustomDate(d);
+                if (customDateRef.current) customDateRef.current.value = d;
+              }
+            }}
+            onChange={(e) => setCustomDate(e.target.value)}
+            onBlur={() => {
+              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+              setCustomDate(d);
+              setCustomTime(t);
+              setCustomDue(`${d}T${t}`);
+              setDueInSecs(null);
+            }}
+          />
+          <input
+            ref={customTimeRef}
+            type="time"
+            className="due-datetime"
+            value={customTime}
+            min={customDate === todayDateString() ? timeStringNow() : undefined}
+            onFocus={() => {
+              if (!customDue) {
+                const t = defaultDueTimeString();
+                setCustomTime(t);
+                if (customTimeRef.current) customTimeRef.current.value = t;
+              }
+            }}
+            onChange={(e) => setCustomTime(e.target.value)}
+            onBlur={() => {
+              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+              setCustomDate(d);
+              setCustomTime(t);
+              setCustomDue(`${d}T${t}`);
+              setDueInSecs(null);
+            }}
+          />
+          <button
+            type="button"
+            className="due-btn"
+            onClick={() => {
+              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+              setCustomDate(d);
+              setCustomTime(t);
+              setCustomDue(`${d}T${t}`);
+              setDueInSecs(null);
+            }}
+          >
+            确认
+          </button>
+        </span>
+        {(dueInSecs !== null || customDue) && (
           <span className="due-hint">
             {customDue
               ? `已选 ${new Date(customDue).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-              : `已选 ${dueInMin} 分钟后触发`}
+              : `已选 ${dueInSecs! < 60 ? `${dueInSecs!}秒` : `${Math.round(dueInSecs! / 60)}分钟`}后触发`}
           </span>
         )}
+      </div>
+      <div className="recurrence-presets">
+        <span className="due-label">播放次数：</span>
+        {[1, 2, 3].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${repeatCount === n ? "active" : ""}`}
+            onClick={() => setRepeatCount(n)}
+          >
+            {n}
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={repeatCount <= 1}
+            onClick={() => setRepeatCount((c) => Math.max(1, c - 1))}
+          >
+            −
+          </button>
+          <span className="repeat-count">{repeatCount}</span>
+          <button
+            className="due-btn"
+            disabled={repeatCount >= 10}
+            onClick={() => setRepeatCount((c) => Math.min(10, c + 1))}
+          >
+            +
+          </button>
+        </span>
+      </div>
+      <div className="recurrence-presets">
+        <span className="due-label">播放时长（非弹幕）：</span>
+        {[1, 2, 3].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${playDuration === n ? "active" : ""}`}
+            onClick={() => setPlayDuration(n)}
+          >
+            {n}s
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={playDuration <= 1}
+            onClick={() => setPlayDuration((c) => Math.max(1, c - 1))}
+          >
+            −
+          </button>
+          <span className="repeat-count">{playDuration}s</span>
+          <button
+            className="due-btn"
+            disabled={playDuration >= 5}
+            onClick={() => setPlayDuration((c) => Math.min(5, c + 1))}
+          >
+            +
+          </button>
+        </span>
+      </div>
+      <div className="recurrence-presets">
+        <span className="due-label">弹幕速度：</span>
+        {[80, 120, 180].map((n) => (
+          <button
+            key={n}
+            className={`due-btn ${danmakuSpeed === n ? "active" : ""}`}
+            onClick={() => setDanmakuSpeed(n)}
+          >
+            {n === 80 ? "慢" : n === 120 ? "正常" : "快"}
+          </button>
+        ))}
+        <span className="repeat-stepper">
+          <button
+            className="due-btn"
+            disabled={danmakuSpeed <= 50}
+            onClick={() => setDanmakuSpeed((c) => Math.max(50, c - 10))}
+          >
+            −
+          </button>
+          <span className="repeat-count">{danmakuSpeed}</span>
+          <button
+            className="due-btn"
+            disabled={danmakuSpeed >= 250}
+            onClick={() => setDanmakuSpeed((c) => Math.min(250, c + 10))}
+          >
+            +
+          </button>
+        </span>
       </div>
       <div className="recurrence-presets">
         <span className="due-label">重复：</span>
@@ -1042,35 +1422,48 @@ function App() {
         ))}
       </div>
 
-      <div className="effect-panel">
-        <span className="due-label">特效演示：</span>
-        {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
-          <button
-            key={k}
-            className="effect-demo-btn"
-            style={{ borderColor: EFFECT_COLOR[k], color: EFFECT_COLOR[k] }}
-            onClick={() => previewEffect(k)}
-            title={`预览 ${EFFECT_LABEL[k]} 特效`}
-          >
-            {EFFECT_LABEL[k]}
-          </button>
-        ))}
-        <span className="effect-panel-hint">
-          点击按钮可即时预览 · 快捷键 ⌘⇧4/5/6/7/8
-        </span>
+      <div className="debug-section">
+        <button
+          className="debug-toggle"
+          onClick={() => setDebugOpen((o) => !o)}
+          aria-expanded={debugOpen}
+        >
+          <span>特效演示</span>
+          <span className="debug-arrow">{debugOpen ? "▴" : "▾"}</span>
+        </button>
+        {debugOpen && (
+          <div className="debug-body">
+            <div className="effect-panel">
+              <span className="due-label">特效演示：</span>
+              {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
+                <button
+                  key={k}
+                  className="effect-demo-btn"
+                  style={{ borderColor: ec[k], color: ec[k] }}
+                  onClick={() => previewEffect(k)}
+                  title={`预览 ${EFFECT_LABEL[k]} 特效`}
+                >
+                  {EFFECT_LABEL[k]}
+                </button>
+              ))}
+              <span className="effect-panel-hint">快捷键 ⌘⇧4/5/6/7/8</span>
+            </div>
+
+            <div className="danmaku-bar">
+              <input
+                value={danmakuInput}
+                onChange={(e) => setDanmakuInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendDanmaku()}
+                placeholder="直接发弹幕..."
+              />
+              <button onClick={sendDanmaku}>发送</button>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="danmaku-bar">
-        <input
-          value={danmakuInput}
-          onChange={(e) => setDanmakuInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && sendDanmaku()}
-          placeholder="直接发弹幕..."
-        />
-        <button onClick={sendDanmaku}>发送</button>
-      </div>
       <div className="console-hint">
-        点击待办标题触发 · 到期自动派发 · ⌘⇧4/5/6/7/8 预览新特效 · 已发 {danmakuCount} 条
+        点击待办标题触发 · 到期自动派发 · 已发 {danmakuCount} 条
       </div>
 
       {/* Undo Toast */}
@@ -1082,7 +1475,9 @@ function App() {
         </div>
       )}
     </div>
+    </ErrorBoundary>
   );
 }
 
 export default App;
+export { ErrorBoundary };

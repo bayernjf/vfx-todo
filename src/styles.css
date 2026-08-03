@@ -43,6 +43,8 @@ html {
   --text-dim-70: rgba(229,229,229,0.7);
   --text-dim-80: rgba(229,229,229,0.8);
   --text-dim-85: rgba(229,229,229,0.85);
+  --accent: #cfd8ff;          /* 强调色（hover/选中态文字） */
+  --on-accent: #1a1d24;       /* 彩色背景上的反色文字（深主题用深字） */
 }
 [data-theme="light"] {
   --bg-primary: #f0f2f5;
@@ -73,6 +75,8 @@ html {
   --text-dim-70: rgba(0,0,0,0.65);
   --text-dim-80: rgba(0,0,0,0.75);
   --text-dim-85: rgba(0,0,0,0.80);
+  --accent: #4b3fe3;          /* 浅色主题下用更深的紫蓝，保证对比度 */
+  --on-accent: #ffffff;       /* 浅色主题下彩色背景用白字 */
 }
 @media (prefers-color-scheme: light) {
   html:not([data-theme="dark"]) {
@@ -104,6 +108,8 @@ html {
     --text-dim-70: rgba(0,0,0,0.65);
     --text-dim-80: rgba(0,0,0,0.75);
     --text-dim-85: rgba(0,0,0,0.80);
+    --accent: #4b3fe3;
+    --on-accent: #ffffff;
   }
 }
 
@@ -126,22 +132,37 @@ body:not(.overlay-mode) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .badge {
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.04em;
-  color: #cfd8ff;
+  color: var(--accent);
   background: rgba(96, 84, 241, 0.18);
   border: 1px solid rgba(96, 84, 241, 0.35);
   padding: 4px 12px;
   border-radius: 999px;
 }
 
+.header-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-dim-90);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
 .counter {
-  font-size: 12px;
-  color: var(--text-dim-60);
+  font-size: 11px;
+  color: var(--text-dim-50);
   font-variant-numeric: tabular-nums;
 }
 
@@ -213,7 +234,7 @@ body:not(.overlay-mode) {
 }
 
 .todo-title:hover {
-  color: #cfd8ff;
+  color: var(--accent);
 }
 
 .todo-btn {
@@ -232,22 +253,22 @@ body:not(.overlay-mode) {
 
 .todo-btn.complete {
   background: rgba(78, 205, 196, 0.2);
-  color: #4ecdc4;
+  color: var(--level-color, #0e8e85);
 }
 
 .todo-btn.delete {
   background: rgba(255, 107, 107, 0.15);
-  color: #ff6b6b;
+  color: #d63a3a;
 }
 
 .todo-btn.edit {
   background: rgba(96, 84, 241, 0.2);
-  color: #a29bfe;
+  color: var(--accent);
 }
 
 .todo-btn.save {
   background: rgba(78, 205, 196, 0.25);
-  color: #4ecdc4;
+  color: var(--level-color, #0e8e85);
 }
 
 .todo-btn.cancel {
@@ -400,7 +421,7 @@ body:not(.overlay-mode) {
   border: 1px solid rgba(255, 107, 107, 0.3);
   border-radius: 4px;
   background: rgba(255, 107, 107, 0.08);
-  color: rgba(255, 107, 107, 0.8);
+  color: #d63a3a;
   cursor: pointer;
   font-family: inherit;
   transition: all 0.15s;
@@ -409,6 +430,7 @@ body:not(.overlay-mode) {
 .clear-completed-btn:hover {
   background: rgba(255, 107, 107, 0.18);
   border-color: rgba(255, 107, 107, 0.5);
+  color: #b71c1c;
 }
 
 /* ============ 排序下拉 ============ */
@@ -441,7 +463,7 @@ body:not(.overlay-mode) {
 
 .batch-info {
   font-size: 12px;
-  color: #a29bfe;
+  color: var(--accent);
 }
 
 .batch-actions {
@@ -484,7 +506,7 @@ body:not(.overlay-mode) {
 .batch-btn.complete {
   border-color: rgba(78, 205, 196, 0.35);
   background: rgba(78, 205, 196, 0.12);
-  color: #4ecdc4;
+  color: #0e8e85;
 }
 
 .batch-btn.complete:hover {
@@ -494,7 +516,7 @@ body:not(.overlay-mode) {
 .batch-btn.delete {
   border-color: rgba(255, 107, 107, 0.35);
   background: rgba(255, 107, 107, 0.12);
-  color: #ff6b6b;
+  color: #d63a3a;
 }
 
 .batch-btn.delete:hover {
@@ -520,6 +542,7 @@ body:not(.overlay-mode) {
 .todo-input {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .todo-input select {
@@ -536,6 +559,7 @@ body:not(.overlay-mode) {
 .todo-input input,
 .danmaku-bar input {
   flex: 1;
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--glass-18);
   border-radius: 6px;
@@ -562,16 +586,50 @@ body:not(.overlay-mode) {
   border: none;
   border-radius: 6px;
   background: #6054f1;
-  color: #fff;
+  color: var(--on-accent);
   font-size: 14px;
   cursor: pointer;
   transition: background 0.15s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .todo-input button:hover,
 .danmaku-bar button:hover {
   background: #4b3fe3;
+}
+
+/* ============ 提醒强度胶囊 ============ */
+.level-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.level-pill {
+  padding: 6px 12px;
+  border: 1px solid var(--level-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--level-color);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  opacity: 0.75;
+}
+
+.level-pill:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--level-color) 12%, transparent);
+}
+
+.level-pill.active {
+  background: var(--level-color);
+  color: var(--on-accent);
+  opacity: 1;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--level-color) 35%, transparent);
 }
 
 /* ============ 弹幕快速栏 ============ */
@@ -606,18 +664,18 @@ body:not(.overlay-mode) {
 
 .due-btn:hover {
   border-color: #6054f1;
-  color: #cfd8ff;
+  color: var(--accent);
 }
 
 .due-btn.active {
   background: rgba(96, 84, 241, 0.25);
   border-color: #6054f1;
-  color: #cfd8ff;
+  color: var(--accent);
 }
 
 .due-hint {
   font-size: 11px;
-  color: #4ecdc4;
+  color: #0e8e85;
 }
 
 .due-datetime {
@@ -636,6 +694,30 @@ body:not(.overlay-mode) {
   border-color: #6054f1;
 }
 
+/* 自定义时间输入框（日期 + 时间）与「确认」按钮贴在一起，作为一个整体 */
+.due-datetime-group {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.due-datetime-group > * {
+  border-radius: 0;
+}
+
+.due-datetime-group > *:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.due-datetime-group > *:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.due-datetime-group > * + * {
+  margin-left: -1px;
+}
+
 .due-datetime::-webkit-calendar-picker-indicator {
   filter: invert(0.8);
   cursor: pointer;
@@ -648,12 +730,37 @@ body:not(.overlay-mode) {
   flex-wrap: wrap;
 }
 
+/* 播放次数紧凑加减组 */
+.repeat-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.repeat-stepper .due-btn {
+  padding: 3px 6px;
+  border-radius: 0;
+}
+.repeat-stepper .due-btn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.repeat-stepper .due-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.repeat-count {
+  min-width: 22px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0 4px;
+}
+
 .recurrence-badge {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(96, 84, 241, 0.25);
-  color: #a29bfe;
+  color: var(--accent);
   margin-left: 6px;
 }
 
@@ -684,11 +791,14 @@ body:not(.overlay-mode) {
   font-family: inherit;
   transition: all 0.15s ease;
   font-weight: 500;
+  opacity: 0.9;
 }
 
 .effect-demo-btn:hover {
-  background: currentColor;
-  color: #1a1d24 !important;
+  background: #4b3fe3;
+  border-color: #4b3fe3;
+  color: var(--on-accent);
+  opacity: 1;
 }
 
 .effect-panel-hint {
@@ -697,12 +807,55 @@ body:not(.overlay-mode) {
   margin-left: 8px;
 }
 
+/* ============ 特效演示折叠区 ============ */
+.debug-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.debug-toggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--glass-15);
+  border-radius: 999px;
+  background: var(--glass-06);
+  color: var(--text-dim-55);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.debug-toggle:hover {
+  color: var(--text-dim-85);
+  border-color: var(--glass-30);
+}
+
+.debug-arrow {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.debug-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--glass-12);
+  border-radius: 8px;
+  background: var(--glass-05);
+}
+
 /* 标签筛选与角标 */
 .tag-badge {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  color: #fff;
+  color: var(--on-accent);
   margin-left: 6px;
   font-weight: 500;
 }
@@ -732,22 +885,30 @@ body:not(.overlay-mode) {
 }
 
 .tag-filter-pill.active {
-  color: #fff;
+  color: var(--on-accent);
+  background: var(--accent);
   font-weight: 600;
 }
 
 .header-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin-left: auto;
 }
 
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   background: var(--glass-08);
   border: 1px solid var(--glass-12);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 14px;
+  border-radius: 6px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim-65);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -755,6 +916,7 @@ body:not(.overlay-mode) {
 .icon-btn:hover {
   background: rgba(96, 84, 241, 0.2);
   border-color: rgba(96, 84, 241, 0.5);
+  color: var(--text-dim-90);
 }
 
 .console-hint {
@@ -775,7 +937,7 @@ body.overlay-mode {
   z-index: 100;
   padding: 6px 12px;
   background: rgba(255, 0, 0, 0.6);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 14px;
   font-family: monospace;
   border-radius: 4px;
@@ -804,6 +966,31 @@ body.overlay-mode {
   z-index: 20;
 }
 
+/* VFX 文字叠加层 */
+.vfx-text-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 48px;
+  font-weight: 700;
+  text-shadow: 0 0 20px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  z-index: 30;
+  animation: vfx-text-pulse 0.3s ease-out;
+}
+
+@keyframes vfx-text-pulse {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
 /* ===== Undo Toast ===== */
 .undo-toast {
   position: fixed;
@@ -815,7 +1002,7 @@ body.overlay-mode {
   gap: 12px;
   padding: 12px 20px;
   background: #6054f1;
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   z-index: 999;
@@ -828,7 +1015,7 @@ body.overlay-mode {
 }
 .undo-toast-btn {
   background: rgba(255,255,255,0.2);
-  color: #fff;
+  color: var(--on-accent);
   border: 1px solid rgba(255,255,255,0.3);
   padding: 4px 14px;
   border-radius: 4px;
@@ -849,7 +1036,7 @@ body.overlay-mode {
   line-height: 1;
 }
 .undo-toast-close:hover {
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* ===== Drag & Drop ===== */
@@ -878,4 +1065,43 @@ body.overlay-mode {
 }
 .todo-item[draggable="true"] .drag-handle {
   cursor: grab;
+}
+
+/* 错误边界 */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text);
+}
+.error-boundary h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: #ff6b6b;
+}
+.error-boundary .error-message {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+  max-width: 400px;
+  word-break: break-word;
+}
+.error-retry-btn {
+  padding: 0.5rem 1.5rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.error-retry-btn:hover {
+  opacity: 0.85;
 }
