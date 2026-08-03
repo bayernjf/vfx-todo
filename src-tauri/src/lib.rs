@@ -719,6 +719,30 @@ fn get_macos_screen_names() -> Vec<String> {
     ctx.names
 }
 
+/// Windows: 通过 EnumDisplayDevicesW 获取显示器友好名称
+#[cfg(target_os = "windows")]
+fn get_windows_monitor_friendly_name(device_name: &str) -> Option<String> {
+    use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
+    use windows::core::PCWSTR;
+
+    let mut dd = DISPLAY_DEVICEW::default();
+    dd.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+
+    let wide: Vec<u16> = device_name.encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        if EnumDisplayDevicesW(PCWSTR::from_raw(wide.as_ptr()), 0, &mut dd, 0).as_bool() {
+            let name = String::from_utf16_lossy(&dd.DeviceString)
+                .trim_end_matches('\0')
+                .to_string();
+            if !name.is_empty() && !name.starts_with("Generic") {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
 /// 返回所有屏幕列表，供前端选择目标屏幕
 #[tauri::command]
 fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
@@ -731,7 +755,7 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
     }
     let primary_name: Option<&str> = primary.as_ref().and_then(|m| m.name()).map(|s| s.as_str());
 
-    // macOS: 用 NSScreen.localizedName 拿真实名称；其他平台用 monitor.name()
+    // macOS: 用 NSScreen.localizedName 拿真实名称
     #[cfg(target_os = "macos")]
     let macos_names = get_macos_screen_names();
 
@@ -741,9 +765,9 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
         .map(|(idx, m)| {
             let is_primary = m.name().map(|s| s.as_str()) == primary_name;
 
-            // macOS 优先用 NSScreen 名称
+            // ── macOS: NSScreen.localizedName ──
             #[cfg(target_os = "macos")]
-            let resolved = {
+            let resolved: Option<String> = {
                 let raw = macos_names.get(idx).cloned().unwrap_or_default();
                 if raw.contains("内建") || raw.contains("Built-in") {
                     Some("内建屏".to_string())
@@ -754,16 +778,33 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
                 }
             };
 
-            #[cfg(not(target_os = "macos"))]
+            // ── Windows: EnumDisplayDevicesW 友好名称 ──
+            #[cfg(target_os = "windows")]
             let resolved: Option<String> = {
                 let system_name = m.name().map_or("", |v| v);
-                if !system_name.is_empty()
-                    && !system_name.starts_with("\\")
-                    && !system_name.starts_with("monitor")
-                    && !system_name.starts_with("Monitor")
-                    && system_name.len() < 40
+                get_windows_monitor_friendly_name(system_name)
+            };
+
+            // ── Linux/其他: X11 输出名 (eDP-1, HDMI-1, DP-1…) ──
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            let resolved: Option<String> = {
+                let sn = m.name().map_or("", |v| v);
+                if sn.starts_with("eDP") || sn.starts_with("LVDS") {
+                    Some("内建屏".to_string())
+                } else if sn.starts_with("HDMI")
+                    || sn.starts_with("DP")
+                    || sn.starts_with("VGA")
+                    || sn.starts_with("DVI")
+                    || sn.starts_with("DisplayPort")
                 {
-                    Some(system_name.to_string())
+                    Some(sn.to_string())
+                } else if !sn.is_empty()
+                    && !sn.starts_with("\\")
+                    && !sn.starts_with("monitor")
+                    && !sn.starts_with("Monitor")
+                    && sn.len() < 40
+                {
+                    Some(sn.to_string())
                 } else {
                     None
                 }
