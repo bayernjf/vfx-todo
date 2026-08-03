@@ -678,6 +678,47 @@ fn set_current_effect(app: tauri::AppHandle, effect: String) -> Result<(), Strin
     Ok(())
 }
 
+/// macOS: 通过 NSScreen.localizedName 获取真实显示器名称
+#[cfg(target_os = "macos")]
+fn get_macos_screen_names() -> Vec<String> {
+    extern "C" {
+        fn dispatch_get_main_queue() -> *mut std::ffi::c_void;
+        fn dispatch_sync_f(
+            queue: *mut std::ffi::c_void,
+            context: *mut std::ffi::c_void,
+            work: extern "C" fn(*mut std::ffi::c_void),
+        );
+    }
+
+    struct SyncContext {
+        names: Vec<String>,
+    }
+
+    extern "C" fn work(ctx_ptr: *mut std::ffi::c_void) {
+        unsafe {
+            let ctx = &mut *(ctx_ptr as *mut SyncContext);
+            use objc2_app_kit::NSScreen;
+            use objc2_foundation::MainThreadMarker;
+
+            // dispatch_sync_f 已确保在主线程执行
+            let mtm = MainThreadMarker::new_unchecked();
+            let screens = NSScreen::screens(mtm);
+            for i in 0..screens.count() {
+                let screen = screens.objectAtIndex(i);
+                let name = screen.localizedName();
+                ctx.names.push(name.to_string());
+            }
+        }
+    }
+
+    let mut ctx = Box::new(SyncContext { names: Vec::new() });
+    let ctx_ptr = ctx.as_mut() as *mut SyncContext as *mut std::ffi::c_void;
+    unsafe {
+        dispatch_sync_f(dispatch_get_main_queue(), ctx_ptr, work);
+    }
+    ctx.names
+}
+
 /// 返回所有屏幕列表，供前端选择目标屏幕
 #[tauri::command]
 fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
@@ -689,24 +730,53 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
         }
     }
     let primary_name: Option<&str> = primary.as_ref().and_then(|m| m.name()).map(|s| s.as_str());
+
+    // macOS: 用 NSScreen.localizedName 拿真实名称；其他平台用 monitor.name()
+    #[cfg(target_os = "macos")]
+    let macos_names = get_macos_screen_names();
+
     let screens = all_monitors
         .iter()
         .enumerate()
         .map(|(idx, m)| {
             let is_primary = m.name().map(|s| s.as_str()) == primary_name;
-            let system_name = m.name().map_or("", |v| v);
-            let name = if !system_name.is_empty()
-                && !system_name.starts_with("\\")
-                && !system_name.starts_with("monitor")
-                && !system_name.starts_with("Monitor")
-                && system_name.len() < 40
-            {
-                system_name.to_string()
-            } else if is_primary {
-                "内建显示器".to_string()
-            } else {
-                format!("外接显示器 {}", idx + 1)
+
+            // macOS 优先用 NSScreen 名称
+            #[cfg(target_os = "macos")]
+            let resolved = {
+                let raw = macos_names.get(idx).cloned().unwrap_or_default();
+                if raw.contains("内建") || raw.contains("Built-in") {
+                    Some("内建屏".to_string())
+                } else if !raw.is_empty() {
+                    Some(raw)
+                } else {
+                    None
+                }
             };
+
+            #[cfg(not(target_os = "macos"))]
+            let resolved: Option<String> = {
+                let system_name = m.name().map_or("", |v| v);
+                if !system_name.is_empty()
+                    && !system_name.starts_with("\\")
+                    && !system_name.starts_with("monitor")
+                    && !system_name.starts_with("Monitor")
+                    && system_name.len() < 40
+                {
+                    Some(system_name.to_string())
+                } else {
+                    None
+                }
+            };
+
+            let name = resolved.unwrap_or_else(|| {
+                if is_primary {
+                    "内建屏".to_string()
+                } else {
+                    format!("外接屏 {}", idx + 1)
+                }
+            });
+
             ScreenInfo {
                 id: idx as i32,
                 name,
