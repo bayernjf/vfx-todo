@@ -177,10 +177,7 @@ fn js_sys_now() -> i64 {
 
 // ============ 弹幕/特效派发 ============
 
-// 弹幕默认颜色
-const DEFAULT_DANMAKU_COLOR: &str = "#ff6b6b";
-
-/// VFX 特效随机配色表
+/// VFX/弹幕随机配色表
 const VFX_COLOR_PALETTE: &[&str] = &[
     "#ff6b6b", // 红
     "#ffe66d", // 黄
@@ -195,10 +192,11 @@ const VFX_COLOR_PALETTE: &[&str] = &[
 ];
 
 fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, screen: i32, repeat_count: u8, danmaku_speed: f64) {
+    let color = VFX_COLOR_PALETTE[rand::random::<usize>() % VFX_COLOR_PALETTE.len()];
     let payload = DanmakuPayload {
         id: js_sys_now() as f64,
         text: text.to_string(),
-        color: DEFAULT_DANMAKU_COLOR.to_string(),
+        color: color.to_string(),
         speed: danmaku_speed.clamp(50.0, 250.0),
         repeat_count: repeat_count.clamp(1, 10),
     };
