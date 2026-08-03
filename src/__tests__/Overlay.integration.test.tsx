@@ -19,6 +19,18 @@ vi.mock("@tauri-apps/api/event", () => ({
   },
 }));
 
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({
+    listen: <T,>(event: string, handler: (p: { payload: T }) => void) => {
+      if (!eventListeners.has(event)) eventListeners.set(event, new Set());
+      eventListeners.get(event)!.add(handler as (payload: unknown) => void);
+      return Promise.resolve(() =>
+        eventListeners.get(event)?.delete(handler as (payload: unknown) => void),
+      );
+    },
+  }),
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve() }));
 
 import Overlay from "../Overlay";

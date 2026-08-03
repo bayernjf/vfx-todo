@@ -94,6 +94,7 @@ interface ScreenInfo {
 interface Preferences {
   default_screen: number;
   theme?: string;
+  default_effect?: string;
 }
 
 const EFFECT_LABEL: Record<EffectType, string> = {
@@ -671,7 +672,7 @@ function App() {
   const [repeatCount, setRepeatCount] = useState(1);
   const [playDuration, setPlayDuration] = useState(2);
   const [danmakuSpeed, setDanmakuSpeed] = useState(120);
-  const [effect, setEffect] = useState<EffectType>("danmaku");
+  const [effect, setEffect] = useState<EffectType | "random">("danmaku");
   const [filterTag, setFilterTag] = useState<TagType | "">("");
   const [newTag, setNewTag] = useState<TagType | "">("");
 
@@ -788,6 +789,9 @@ function App() {
         if (p.theme === "dark" || p.theme === "light") {
           setTheme(p.theme);
         }
+        if (p.default_effect) {
+          setEffect(p.default_effect as EffectType | "random");
+        }
       })
       .catch(() => {}); // 首次启动无文件，正常
   }, []);
@@ -865,7 +869,9 @@ function App() {
       dueAt,
       screen: targetScreen,
       recurrence,
-      effect,
+      effect: effect === "random"
+        ? (Object.keys(EFFECT_LABEL) as EffectType[])[Math.floor(Math.random() * (Object.keys(EFFECT_LABEL)).length)]
+        : effect,
       tag: newTag || null,
       repeatCount,
       playDuration,
@@ -881,7 +887,6 @@ function App() {
     if (customDateRef.current) customDateRef.current.value = defaultDueDateString();
     if (customTimeRef.current) customTimeRef.current.value = defaultDueTimeString();
     setRecurrence(null);
-    setEffect("danmaku");
     setNewTag("");
     setRepeatCount(1);
     setPlayDuration(2);
@@ -1205,12 +1210,18 @@ function App() {
         <select
           value={effect}
           onChange={(e) => {
-            const v = e.target.value as EffectType;
+            const v = e.target.value as EffectType | "random";
             setEffect(v);
-            invoke("set_current_effect", { effect: v }).catch(console.error);
+            const p = { ...prefs, default_effect: v };
+            setPrefs(p);
+            savePrefs(p);
+            if (v !== "random") {
+              invoke("set_current_effect", { effect: v }).catch(console.error);
+            }
           }}
           title="选择默认特效，快捷键 ⌘⇧2/3/4 将触发此特效"
         >
+          <option value="random">随机</option>
           {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
             <option key={k} value={k}>
               {EFFECT_LABEL[k]}

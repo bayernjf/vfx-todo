@@ -101,9 +101,15 @@ struct Preferences {
     /// 主题：system / dark / light
     #[serde(default = "default_theme")]
     theme: String,
+    /// 默认特效：danmaku / shatter / particle / rain / firework / ripple / laser / glitch
+    #[serde(default = "default_effect")]
+    default_effect: String,
 }
 fn default_theme() -> String {
     "system".to_string()
+}
+fn default_effect() -> String {
+    "danmaku".to_string()
 }
 
 #[derive(Clone)]
@@ -441,6 +447,7 @@ fn load_prefs(app: tauri::AppHandle) -> Result<Preferences, String> {
         Ok(Preferences {
             default_screen: 0,
             theme: "system".to_string(),
+            default_effect: "danmaku".to_string(),
         })
     }
 }
@@ -1619,14 +1626,14 @@ mod tests {
     // ---------- 偏好设置 ----------
     #[test]
     fn preferences_default_values() {
-        let prefs = Preferences { default_screen: 0, theme: "system".into() };
+        let prefs = Preferences { default_screen: 0, theme: "system".into(), default_effect: "danmaku".into() };
         assert_eq!(prefs.default_screen, 0);
         assert_eq!(prefs.theme, "system");
     }
 
     #[test]
     fn preferences_serialization_roundtrip() {
-        let prefs = Preferences { default_screen: 1, theme: "dark".into() };
+        let prefs = Preferences { default_screen: 1, theme: "dark".into(), default_effect: "danmaku".into() };
         let json = serde_json::to_string(&prefs).unwrap();
         let parsed: Preferences = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.default_screen, 1);
