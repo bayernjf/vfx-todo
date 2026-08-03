@@ -1105,3 +1105,39 @@ body.overlay-mode {
 .error-retry-btn:hover {
   opacity: 0.85;
 }
+
+/* 屏幕选择闪边反馈 */
+.screen-flash-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  border: 4px solid var(--accent);
+  border-radius: 0;
+  animation: screen-flash 1.5s ease-out forwards;
+}
+.screen-flash-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0.5rem 1.5rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  font-family: inherit;
+  opacity: 0;
+  animation: screen-label-fade 1.5s ease-out forwards;
+}
+@keyframes screen-flash {
+  0% { border-color: var(--accent); box-shadow: 0 0 30px var(--accent); }
+  50% { border-color: var(--accent); box-shadow: 0 0 60px var(--accent); }
+  100% { border-color: transparent; box-shadow: 0 0 0 transparent; }
+}
+@keyframes screen-label-fade {
+  0% { opacity: 1; }
+  60% { opacity: 1; }
+  100% { opacity: 0; }
+}

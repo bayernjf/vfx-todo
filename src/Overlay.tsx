@@ -628,6 +628,8 @@ function Overlay() {
   const [vfxText, setVfxText] = useState("");
   const [vfxTextColor, setVfxTextColor] = useState("#ffffff");
   const vfxTextTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const [flashScreenName, setFlashScreenName] = useState("");
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     document.body.classList.add("overlay-mode");
@@ -705,6 +707,7 @@ function Overlay() {
     let cancelled = false;
     let unlistenDanmaku: (() => void) | undefined;
     let unlistenVfx: (() => void) | undefined;
+    let unlistenFlash: (() => void) | undefined;
 
     (async () => {
       const u1 = await listen<DanmakuItem>("danmaku", (event) => {
@@ -770,6 +773,18 @@ function Overlay() {
         return;
       }
       unlistenVfx = u2;
+
+      const u3 = await listen<any>("screen-flash", (event) => {
+        const name = event.payload?.screen_name || "";
+        setFlashScreenName(name);
+        clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => setFlashScreenName(""), 1500);
+      });
+      if (cancelled) {
+        u3();
+        return;
+      }
+      unlistenFlash = u3;
     })();
 
     return () => {
@@ -779,6 +794,8 @@ function Overlay() {
       window.removeEventListener("resize", resize);
       unlistenDanmaku?.();
       unlistenVfx?.();
+      unlistenFlash?.();
+      clearTimeout(flashTimerRef.current);
       vfxEngineRef.current?.destroy();
     };
   }, []);
@@ -787,6 +804,11 @@ function Overlay() {
     <>
       <canvas ref={vfxCanvasRef} className="vfx-canvas" />
       <canvas ref={danmakuCanvasRef} className="overlay-canvas" />
+      {flashScreenName && (
+        <div className={`screen-flash-overlay ${flashScreenName ? "active" : ""}`}>
+          <span className="screen-flash-label">{flashScreenName}</span>
+        </div>
+      )}
       {vfxText && (
         <div className="vfx-text-overlay" style={{ color: vfxTextColor }}>
           {vfxText}
