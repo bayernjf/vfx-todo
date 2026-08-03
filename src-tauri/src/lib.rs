@@ -697,13 +697,15 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
             let system_name = m.name().map_or("", |v| v);
             let name = if !system_name.is_empty()
                 && !system_name.starts_with("\\")
+                && !system_name.starts_with("monitor")
+                && !system_name.starts_with("Monitor")
                 && system_name.len() < 40
             {
                 system_name.to_string()
             } else if is_primary {
-                "主屏".to_string()
+                "内建显示器".to_string()
             } else {
-                format!("外接屏 {}", idx + 1)
+                format!("外接显示器 {}", idx + 1)
             };
             ScreenInfo {
                 id: idx as i32,
