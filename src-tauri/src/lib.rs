@@ -692,13 +692,24 @@ fn list_screens(app: tauri::AppHandle) -> Result<Vec<ScreenInfo>, String> {
     let screens = all_monitors
         .iter()
         .enumerate()
-        .map(|(idx, m)| ScreenInfo {
-            id: idx as i32,
-            name: m
-                .name()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("Screen {}", idx)),
-            is_primary: m.name().map(|s| s.as_str()) == primary_name,
+        .map(|(idx, m)| {
+            let is_primary = m.name().map(|s| s.as_str()) == primary_name;
+            let system_name = m.name().map_or("", |v| v);
+            let name = if !system_name.is_empty()
+                && !system_name.starts_with("\\")
+                && system_name.len() < 40
+            {
+                system_name.to_string()
+            } else if is_primary {
+                "主屏".to_string()
+            } else {
+                format!("外接屏 {}", idx + 1)
+            };
+            ScreenInfo {
+                id: idx as i32,
+                name,
+                is_primary,
+            }
         })
         .collect();
     Ok(screens)
