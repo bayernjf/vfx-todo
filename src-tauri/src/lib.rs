@@ -29,6 +29,10 @@ const VFX_EFFECTS: &[&str] = &[
     "glitch",
 ];
 
+fn default_repeat_count() -> u8 { 1 }
+fn default_play_duration() -> u8 { 2 }
+fn default_danmaku_speed() -> f64 { 120.0 }
+
 fn is_vfx_effect(effect: &str) -> bool {
     VFX_EFFECTS.contains(&effect)
 }
@@ -37,7 +41,6 @@ fn is_vfx_effect(effect: &str) -> bool {
 struct Todo {
     id: String,
     title: String,
-    level: String, // "low" | "mid" | "high"
     completed: bool,
     created_at: i64,
     due_at: Option<i64>,
@@ -45,8 +48,7 @@ struct Todo {
     screen: i32, // 目标屏幕 index，0 = 主屏
     #[serde(default)]
     recurrence: Option<String>, // "daily" | "weekly"
-    /// 指定具体特效（如 "rain"），None 时按 level 默认派发
-    /// 仅 VFX 特效（VFX_EFFECTS 列表中）允许出现；danmaku 不通过 effect 字段表达
+    /// 指定特效："danmaku" 弹幕，或其它 VFX 特效（VFX_EFFECTS 列表中）。None 时默认弹幕。
     #[serde(default)]
     effect: Option<String>,
     /// 标签分组：None=未分类，"工作"/"生活"/"紧急"
@@ -55,6 +57,15 @@ struct Todo {
     /// 手动排序顺序，0-based，仅 sortBy=order 时有效
     #[serde(default)]
     order: i64,
+    /// 特效播放次数（1-10），默认 1
+    #[serde(default = "default_repeat_count")]
+    repeat_count: u8,
+    /// 非弹幕特效单次播放时长秒数（1-5），默认 2
+    #[serde(default = "default_play_duration")]
+    play_duration: u8,
+    /// 弹幕速度（50-250），默认 120
+    #[serde(default = "default_danmaku_speed")]
+    danmaku_speed: f64,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -63,14 +74,17 @@ struct DanmakuPayload {
     text: String,
     color: String,
     speed: f64,
+    repeat_count: u8,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct VfxPayload {
     id: f64,
-    effect: String, // "shatter" | "particle" | "rain" | "firework" | "ripple" | "laser" | "glitch"
+    effect: String,
     text: String,
     color: String,
+    repeat_count: u8,
+    play_duration: u8,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -84,14 +98,9 @@ struct ScreenInfo {
 struct Preferences {
     #[serde(default)]
     default_screen: i32,
-    #[serde(default = "default_level")]
-    default_level: String,
     /// 主题：system / dark / light
     #[serde(default = "default_theme")]
     theme: String,
-}
-fn default_level() -> String {
-    "high".to_string()
 }
 fn default_theme() -> String {
     "system".to_string()
@@ -103,6 +112,8 @@ struct AppState {
     dirty: std::sync::Arc<std::sync::Mutex<bool>>,
     /// 到期前 1 分钟已提醒过的 todo id（避免重复通知）
     warned_ids: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
+    /// 前端特效下拉当前选中的特效，供全局快捷键 ⌘⇧1/2/3 派发
+    current_effect: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl AppState {
@@ -111,6 +122,7 @@ impl AppState {
             todos: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             dirty: std::sync::Arc::new(std::sync::Mutex::new(false)),
             warned_ids: std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())),
+            current_effect: std::sync::Arc::new(std::sync::Mutex::new("danmaku".to_string())),
         }
     }
 }
@@ -159,28 +171,17 @@ fn js_sys_now() -> i64 {
 
 // ============ 弹幕/特效派发 ============
 
-fn level_to_color(level: &str) -> &'static str {
-    match level {
-        "high" => "#ff6b6b",
-        "mid" => "#ffe66d",
-        _ => "#4ecdc4",
-    }
-}
+// 弹幕/特效的默认颜色（等级概念已移除，统一使用固定默认值）
+const DEFAULT_DANMAKU_COLOR: &str = "#ff6b6b";
+const DEFAULT_VFX_COLOR: &str = "#ff6b6b";
 
-fn level_to_speed(level: &str) -> f64 {
-    match level {
-        "high" => 80.0,
-        "mid" => 100.0,
-        _ => 140.0,
-    }
-}
-
-fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, level: &str, screen: i32) {
+fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, screen: i32, repeat_count: u8, danmaku_speed: f64) {
     let payload = DanmakuPayload {
         id: js_sys_now() as f64,
         text: text.to_string(),
-        color: level_to_color(level).to_string(),
-        speed: level_to_speed(level),
+        color: DEFAULT_DANMAKU_COLOR.to_string(),
+        speed: danmaku_speed.clamp(50.0, 250.0),
+        repeat_count: repeat_count.clamp(1, 10),
     };
     let label = format!("overlay-{}", screen);
     // 注意：Tauri v2 中 WebviewWindow::emit 会广播给所有窗口
@@ -193,7 +194,7 @@ fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, level: &str, screen: i32
 }
 
 /// 直接向指定屏幕派发具体 VFX 特效
-fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, level: &str, screen: i32) {
+fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32, repeat_count: u8, play_duration: u8) {
     if !is_vfx_effect(effect) {
         log::warn!("dispatch_vfx: unknown effect={}, ignored", effect);
         return;
@@ -202,11 +203,13 @@ fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, level: &str, s
         id: js_sys_now() as f64,
         effect: effect.to_string(),
         text: text.to_string(),
-        color: level_to_color(level).to_string(),
+        color: DEFAULT_VFX_COLOR.to_string(),
+        repeat_count: repeat_count.clamp(1, 10),
+        play_duration: play_duration.clamp(1, 5),
     };
     log::info!(
-        "dispatch vfx: effect={} text={} screen={} level={}",
-        effect, text, screen, level
+        "dispatch vfx: effect={} text={} screen={}",
+        effect, text, screen
     );
     let label = format!("overlay-{}", screen);
     // 必须用 emit_to 精确指定目标窗口，避免广播到所有 overlay
@@ -220,26 +223,28 @@ fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, level: &str, s
     }
 }
 
-/// 按 level 路由：low → 弹幕事件，mid → 粒子特效，high → 破碎特效
-/// 如果指定了 `effect_override` 且为合法 VFX 特效，则优先使用具体特效（覆盖 level 默认）
-fn dispatch_by_level(
-    app: &tauri::AppHandle,
-    text: &str,
-    level: &str,
-    screen: i32,
-    effect_override: Option<&str>,
-) {
-    // 优先使用具体特效（仅 VFX 特效生效，danmaku 走 level 默认）
-    if let Some(effect) = effect_override {
-        if is_vfx_effect(effect) {
-            dispatch_vfx(app, text, effect, level, screen);
-            return;
-        }
+/// 按 effect 路由：danmaku/空 → 弹幕事件，合法 VFX 特效 → 对应 WebGL 特效，其它忽略
+fn dispatch_by_effect(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32) {
+    if effect == "danmaku" || effect.is_empty() {
+        dispatch_danmaku(app, text, screen, 1, 120.0);
+        return;
     }
-    match level {
-        "mid" => dispatch_vfx(app, text, "particle", level, screen),
-        "high" => dispatch_vfx(app, text, "shatter", level, screen),
-        _ => dispatch_danmaku(app, text, level, screen),
+    if is_vfx_effect(effect) {
+        dispatch_vfx(app, text, effect, screen, 1, 2);
+    } else {
+        log::warn!("dispatch_by_effect: unknown effect={}, ignored", effect);
+    }
+}
+
+/// 带重复次数的派发：弹幕发一次带 repeat_count 由 overlay 循环，VFX 发一次由 engine 串行
+fn dispatch_by_effect_multi(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32, repeat_count: u8, play_duration: u8, danmaku_speed: f64) {
+    let count = repeat_count.clamp(1, 10);
+    if effect == "danmaku" || effect.is_empty() {
+        dispatch_danmaku(app, text, screen, count, danmaku_speed.clamp(50.0, 250.0));
+    } else if is_vfx_effect(effect) {
+        dispatch_vfx(app, text, effect, screen, count, play_duration.clamp(1, 5));
+    } else {
+        log::warn!("dispatch_by_effect_multi: unknown effect={}, ignored", effect);
     }
 }
 
@@ -273,12 +278,14 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                             }
                         }
                         if due <= now {
-                            dispatch_by_level(
+                            dispatch_by_effect_multi(
                                 &app,
                                 &todo.title,
-                                &todo.level,
+                                todo.effect.as_deref().unwrap_or("danmaku"),
                                 todo.screen,
-                                todo.effect.as_deref(),
+                                todo.repeat_count,
+                                todo.play_duration,
+                                todo.danmaku_speed,
                             );
                             // 系统通知
                             let _ = app
@@ -299,11 +306,10 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                 };
                                 if next_due > due {
                                     let order = (base_count + new_todos.len()) as i64;
-                                    new_todos.push(Todo {
-                                        id: gen_id(),
-                                        title: todo.title.clone(),
-                                        level: todo.level.clone(),
-                                        completed: false,
+                                new_todos.push(Todo {
+                                    id: gen_id(),
+                                    title: todo.title.clone(),
+                                    completed: false,
                                         created_at: now,
                                         due_at: Some(next_due),
                                         screen: todo.screen,
@@ -311,6 +317,9 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
                                         effect: todo.effect.clone(),
                                         tag: todo.tag.clone(),
                                         order,
+                                        repeat_count: todo.repeat_count,
+                                        play_duration: todo.play_duration,
+                                        danmaku_speed: todo.danmaku_speed,
                                     });
                                 }
                             }
@@ -424,7 +433,6 @@ fn load_prefs(app: tauri::AppHandle) -> Result<Preferences, String> {
     } else {
         Ok(Preferences {
             default_screen: 0,
-            default_level: "high".to_string(),
             theme: "system".to_string(),
         })
     }
@@ -443,14 +451,16 @@ fn save_prefs(app: tauri::AppHandle, prefs: Preferences) -> Result<(), String> {
 fn todo_create(
     state: tauri::State<'_, AppState>,
     title: String,
-    level: String,
     due_at: Option<i64>,
     screen: Option<i32>,
     recurrence: Option<String>,
     effect: Option<String>,
     tag: Option<String>,
+    repeat_count: Option<u8>,
+    play_duration: Option<u8>,
+    danmaku_speed: Option<f64>,
 ) -> Result<Todo, String> {
-    // 仅接受 VFX_EFFECTS 内的值；非法/None 一律存 None（按 level 默认派发）
+    // 仅接受 VFX_EFFECTS 内的值；非法/None 一律存 None（默认弹幕）
     let effect = effect.and_then(|e| {
         if is_vfx_effect(&e) {
             Some(e)
@@ -472,7 +482,6 @@ fn todo_create(
     let todo = Todo {
         id: gen_id(),
         title,
-        level,
         completed: false,
         created_at: js_sys_now(),
         due_at,
@@ -481,6 +490,9 @@ fn todo_create(
         effect,
         tag,
         order,
+        repeat_count: repeat_count.unwrap_or(1).clamp(1, 10),
+        play_duration: play_duration.unwrap_or(2).clamp(1, 5),
+        danmaku_speed: danmaku_speed.unwrap_or(120.0).clamp(50.0, 250.0),
     };
     todos.push(todo.clone());
     *state.dirty.lock().unwrap() = true;
@@ -505,12 +517,14 @@ fn todo_update(
     state: tauri::State<'_, AppState>,
     id: String,
     title: Option<String>,
-    level: Option<String>,
     due_at: Option<Option<i64>>,
     screen: Option<i32>,
     recurrence: Option<Option<String>>,
     effect: Option<Option<String>>,
     tag: Option<Option<String>>,
+    repeat_count: Option<u8>,
+    play_duration: Option<u8>,
+    danmaku_speed: Option<f64>,
 ) -> Result<Todo, String> {
     // 校验 effect（仅接受 VFX_EFFECTS 内的值或 None）
     let effect = effect.map(|e| {
@@ -526,12 +540,14 @@ fn todo_update(
     let mut todos = state.todos.lock().unwrap();
     let todo = todos.iter_mut().find(|t| t.id == id).ok_or("todo not found")?;
     if let Some(t) = title { todo.title = t; }
-    if let Some(l) = level { todo.level = l; }
     if let Some(d) = due_at { todo.due_at = d; }
     if let Some(s) = screen { todo.screen = s; }
     if let Some(r) = recurrence { todo.recurrence = r; }
     if let Some(e) = effect { todo.effect = e; }
     if let Some(t) = tag { todo.tag = t; }
+    if let Some(c) = repeat_count { todo.repeat_count = c.clamp(1, 10); }
+    if let Some(d) = play_duration { todo.play_duration = d.clamp(1, 5); }
+    if let Some(s) = danmaku_speed { todo.danmaku_speed = s.clamp(50.0, 250.0); }
     let updated = todo.clone();
     *state.dirty.lock().unwrap() = true;
     Ok(updated)
@@ -607,31 +623,37 @@ fn trigger_todo(app: tauri::AppHandle, state: tauri::State<'_, AppState>, id: St
         .iter()
         .find(|t| t.id == id)
         .ok_or("todo not found")?;
-    dispatch_by_level(
+    dispatch_by_effect_multi(
         &app,
         &todo.title,
-        &todo.level,
+        todo.effect.as_deref().unwrap_or("danmaku"),
         todo.screen,
-        todo.effect.as_deref(),
+        todo.repeat_count,
+        todo.play_duration,
+        todo.danmaku_speed,
     );
     Ok(())
 }
 
-/// 直接派发一个具体特效（演示面板 / 实时预览用，不依赖 todo）
+/// 直接派发一个特效（演示面板 / 实时预览用，不依赖 todo）
+/// effect 为 "danmaku" 走弹幕，否则走对应 WebGL 特效
 #[tauri::command]
 fn trigger_vfx(
     app: tauri::AppHandle,
     effect: String,
-    level: Option<String>,
     screen: Option<i32>,
 ) -> Result<(), String> {
-    if !is_vfx_effect(&effect) {
-        return Err(format!("unknown effect: {effect}"));
-    }
-    let level = level.unwrap_or_else(|| "mid".to_string());
     let screen = screen.unwrap_or(0);
     let text = format!("Preview {}", effect);
-    dispatch_vfx(&app, &text, &effect, &level, screen);
+    dispatch_by_effect(&app, &text, &effect, screen);
+    Ok(())
+}
+
+/// 前端特效下拉变更时调用，记录"当前特效"，供快捷键 ⌘⇧2/3/4 派发
+#[tauri::command]
+fn set_current_effect(app: tauri::AppHandle, effect: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    *state.current_effect.lock().unwrap() = effect;
     Ok(())
 }
 
@@ -668,6 +690,7 @@ fn send_danmaku(app: tauri::AppHandle, text: String, color: String, speed: f64, 
         text,
         color,
         speed,
+        repeat_count: 1,
     };
     let target = screen.unwrap_or(0);
     let label = format!("overlay-{}", target);
@@ -752,7 +775,7 @@ fn run_multi_screen_self_test(app: &tauri::AppHandle) {
             let _ = send_danmaku(app2.clone(), "SELFTEST-DANMAKU-1".into(), "#ff0000".into(), 100.0, Some(1));
         }
         if app2.get_webview_window("overlay-2").is_some() {
-            dispatch_vfx(&app2, "SELFTEST-VFX-2", "shatter", "mid", 2);
+            dispatch_vfx(&app2, "SELFTEST-VFX-2", "shatter", 2, 1, 2);
         }
         // 对 overlay-0 也发一条，确认基础链路能到达
         let _ = send_danmaku(app2.clone(), "SELFTEST-DANMAKU-0".into(), "#00ff00".into(), 100.0, Some(0));
@@ -851,13 +874,12 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
     let content = match format.as_str() {
         "json" => serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?,
         "csv" => {
-            let mut csv = String::from("id,title,level,completed,created_at,due_at,screen,recurrence,effect,tag\n");
+            let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag\n");
             for t in todos {
                 csv.push_str(&format!(
-                    "{},{},{},{},{},{},{},{},{},{}\n",
+                    "{},{},{},{},{},{},{},{},{}\n",
                     t.id,
                     t.title.replace(",", "\\,"),
-                    t.level,
                     t.completed,
                     t.created_at,
                     t.due_at.map(|v| v.to_string()).unwrap_or_default(),
@@ -894,27 +916,29 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                 if i == 0 { continue; }
                 let parts: Vec<&str> = line.split(',').collect();
                 if parts.len() < 7 { continue; }
-                // 第 9 列是 effect，第 10 列是 tag（旧文件可能没有 → 取不到时存 None）
+                // 列顺序：id,title,completed,created_at,due_at,screen,recurrence,effect,tag
                 let effect = parts
-                    .get(8)
+                    .get(7)
                     .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
                     .and_then(|e| if is_vfx_effect(&e) { Some(e) } else { None });
                 let tag = parts
-                    .get(9)
+                    .get(8)
                     .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
                     .and_then(|t| if is_valid_tag(&t) { Some(t) } else { None });
                 result.push(Todo {
                     id: parts[0].to_string(),
                     title: parts[1].replace("\\,", ","),
-                    level: parts[2].to_string(),
-                    completed: parts[3].parse().unwrap_or(false),
-                    created_at: parts[4].parse().unwrap_or(0),
-                    due_at: parts[5].parse().ok(),
-                    screen: parts[6].parse().unwrap_or(0),
-                    recurrence: parts.get(7).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+                    completed: parts[2].parse().unwrap_or(false),
+                    created_at: parts[3].parse().unwrap_or(0),
+                    due_at: parts[4].parse().ok(),
+                    screen: parts[5].parse().unwrap_or(0),
+                    recurrence: parts.get(6).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
                     effect,
                     tag,
                     order: result.len() as i64,
+                    repeat_count: parts.get(9).and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 10),
+                    play_duration: parts.get(10).and_then(|s| s.parse().ok()).unwrap_or(2).clamp(1, 5),
+                    danmaku_speed: parts.get(11).and_then(|s| s.parse::<f64>().ok()).unwrap_or(120.0).clamp(50.0, 250.0),
                 });
             }
             result
@@ -971,14 +995,17 @@ pub fn run() {
                             let _ = app.emit_to("main", "todos-updated", ());
                         }
                     }
-                    2 => dispatch_by_level(app, "Quick Low", "low", 0, None),
-                    3 => dispatch_by_level(app, "Quick Mid", "mid", 0, None),
-                    4 => dispatch_by_level(app, "Quick High", "high", 0, None),
-                    5 => dispatch_vfx(app, "Quick Rain", "rain", "mid", 0),
-                    6 => dispatch_vfx(app, "Quick Firework", "firework", "mid", 0),
-                    7 => dispatch_vfx(app, "Quick Ripple", "ripple", "mid", 0),
-                    8 => dispatch_vfx(app, "Quick Laser", "laser", "mid", 0),
-                    9 => dispatch_vfx(app, "Quick Glitch", "glitch", "mid", 0),
+                    // ⌘⇧1/2/3：派发前端特效下拉当前选中的特效（current_effect）
+                    2 | 3 | 4 => {
+                        let state = app.state::<AppState>();
+                        let current = state.current_effect.lock().unwrap().clone();
+                        dispatch_by_effect(app, "Quick", &current, 0);
+                    }
+                    5 => dispatch_vfx(app, "Quick Rain", "rain", 0, 1, 2),
+                    6 => dispatch_vfx(app, "Quick Firework", "firework", 0, 1, 2),
+                    7 => dispatch_vfx(app, "Quick Ripple", "ripple", 0, 1, 2),
+                    8 => dispatch_vfx(app, "Quick Laser", "laser", 0, 1, 2),
+                    9 => dispatch_vfx(app, "Quick Glitch", "glitch", 0, 1, 2),
                     _ => {}
                 }
             }
@@ -1023,6 +1050,7 @@ pub fn run() {
             send_danmaku,
             trigger_todo,
             trigger_vfx,
+            set_current_effect,
             list_screens,
             todo_list,
             todo_create,
@@ -1052,7 +1080,6 @@ mod tests {
     // ---------- helpers ----------
     fn make_todo(
         title: &str,
-        level: &str,
         due_at: Option<i64>,
         effect: Option<String>,
         tag: Option<String>,
@@ -1060,7 +1087,6 @@ mod tests {
         Todo {
             id: Uuid::new_v4().to_string(),
             title: title.to_string(),
-            level: level.to_string(),
             completed: false,
             created_at: 1000000,
             due_at,
@@ -1069,6 +1095,9 @@ mod tests {
             effect,
             tag,
             order: 0,
+            repeat_count: 1,
+            play_duration: 2,
+            danmaku_speed: 120.0,
         }
     }
 
@@ -1085,7 +1114,6 @@ mod tests {
     fn todo_create_sync(
         state: &AppState,
         title: String,
-        level: String,
         due_at: Option<i64>,
         screen: i32,
         effect: Option<String>,
@@ -1094,7 +1122,6 @@ mod tests {
         let t = Todo {
             id: Uuid::new_v4().to_string(),
             title,
-            level,
             completed: false,
             created_at: chrono::Utc::now().timestamp_millis(),
             due_at,
@@ -1103,6 +1130,9 @@ mod tests {
             effect: effect.filter(|e| is_vfx_effect(e)),
             tag: tag.filter(|t| is_valid_tag(t)),
             order: state.todos.lock().unwrap().len() as i64,
+            repeat_count: 1,
+            play_duration: 2,
+            danmaku_speed: 120.0,
         };
         state.todos.lock().unwrap().push(t.clone());
         *state.dirty.lock().unwrap() = true;
@@ -1132,7 +1162,6 @@ mod tests {
         state: &AppState,
         id: String,
         title: Option<String>,
-        level: Option<String>,
         due_at: Option<Option<i64>>,
         screen: Option<i32>,
         recurrence: Option<Option<String>>,
@@ -1144,7 +1173,6 @@ mod tests {
         let mut todos = state.todos.lock().unwrap();
         let todo = todos.iter_mut().find(|t| t.id == id).expect("todo not found");
         if let Some(t) = title { todo.title = t; }
-        if let Some(l) = level { todo.level = l; }
         if let Some(d) = due_at { todo.due_at = d; }
         if let Some(s) = screen { todo.screen = s; }
         if let Some(r) = recurrence { todo.recurrence = r; }
@@ -1180,52 +1208,10 @@ mod tests {
         before - todos.len()
     }
 
-    /// 根据 level + due_at 确定性选择特效（测试调度 / 用户体验）
-    fn level_effect_with_due(level: &str, due_at: i64) -> &'static str {
-        let hash = due_at.wrapping_mul(2654435761) as usize;
-        level_effect_from_hash(level, hash)
-    }
-
-    fn level_effect_from_hash(level: &str, hash: usize) -> &'static str {
-        match level {
-            "high" => {
-                const OPTS: &[&str] = &["firework", "shatter", "laser"];
-                OPTS[hash % OPTS.len()]
-            }
-            "mid" => {
-                const OPTS: &[&str] = &["glitch", "particle", "ripple", "rain"];
-                OPTS[hash % OPTS.len()]
-            }
-            _ => "rain",
-        }
-    }
-
-    fn level_color(level: &str) -> &'static str {
-        match level {
-            "high" => "#ff6b6b",
-            "mid" => "#feca57",
-            "low" => "#4ecdc4",
-            _ => "#ffffff",
-        }
-    }
-
-    fn level_danmaku_speed(level: &str) -> f64 {
-        match level {
-            "high" => 250.0,
-            "mid" => 180.0,
-            "low" => 120.0,
-            _ => 180.0,
-        }
-    }
-
-    fn level_effect(level: &str) -> &'static str {
-        level_effect_from_hash(level, rand::random::<usize>())
-    }
-
     // ---------- Todo 数据模型 ----------
     #[test]
     fn todo_serialization_roundtrip() {
-        let todo = make_todo("测试", "high", Some(2000000), Some("particle".into()), Some("工作".into()));
+        let todo = make_todo("测试", Some(2000000), Some("particle".into()), Some("工作".into()));
         let json = serde_json::to_string(&todo).unwrap();
         let parsed: Todo = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.title, "测试");
@@ -1240,40 +1226,13 @@ mod tests {
         assert_eq!(t.title, "hi");
     }
 
-    // ---------- 等级 → 颜色 / 弹幕速度 / 特效路由 ----------
+    // ---------- 特效路由：弹幕与 VFX 区分 ----------
     #[test]
-    fn level_color_mapping() {
-        assert_eq!(level_color("high"), "#ff6b6b");
-        assert_eq!(level_color("mid"), "#feca57");
-        assert_eq!(level_color("low"), "#4ecdc4");
-        assert!(level_color("unknown").starts_with("#"));
-    }
-
-    #[test]
-    fn level_danmaku_speed_mapping() {
-        assert_eq!(level_danmaku_speed("high"), 250.0);
-        assert_eq!(level_danmaku_speed("mid"), 180.0);
-        assert_eq!(level_danmaku_speed("low"), 120.0);
-        assert_eq!(level_danmaku_speed("unknown"), 180.0);
-    }
-
-    #[test]
-    fn level_effect_routing() {
-        // high → firework / shatter / laser
-        for _ in 0..20 {
-            let e = level_effect("high");
-            assert!(e == "firework" || e == "shatter" || e == "laser",
-                "high 应路由到 firework/shatter/laser，得到: {}", e);
-        }
-        // mid → glitch / particle / ripple / rain
-        for _ in 0..20 {
-            let e = level_effect("mid");
-            assert!(e == "glitch" || e == "particle" || e == "ripple" || e == "rain",
-                "mid 应路由到 glitch/particle/ripple/rain，得到: {}", e);
-        }
-        // low → rain only
-        for _ in 0..10 {
-            assert_eq!(level_effect("low"), "rain");
+    fn effect_routing_danmaku_vs_vfx() {
+        // 弹幕单独走 Canvas 通道，不属于 WebGL VFX
+        assert!(!is_vfx_effect("danmaku"));
+        for e in &["shatter", "particle", "rain", "firework", "ripple", "laser", "glitch"] {
+            assert!(is_vfx_effect(e), "{} 应该是合法 VFX", e);
         }
     }
 
@@ -1313,8 +1272,8 @@ mod tests {
         let state = test_state();
         {
             let mut todos = state.todos.lock().unwrap();
-            todos.push(make_todo("A", "high", None, None, None));
-            todos.push(make_todo("B", "low", None, None, None));
+            todos.push(make_todo("A", None, None, None));
+            todos.push(make_todo("B", None, None, None));
         }
         assert_eq!(todos_list_sync(&state).len(), 2);
     }
@@ -1323,7 +1282,7 @@ mod tests {
     fn todo_create_adds_to_list() {
         let state = test_state();
         let created = todo_create_sync(
-            &state, "新任务".into(), "high".into(), None, 0,
+            &state, "新任务".into(), None, 0,
             Some("firework".into()), Some("工作".into()),
         );
         assert_eq!(created.title, "新任务");
@@ -1337,7 +1296,7 @@ mod tests {
     fn todo_create_rejects_invalid_effect_and_tag() {
         let state = test_state();
         let created = todo_create_sync(
-            &state, "坏参数".into(), "high".into(), None, 0,
+            &state, "坏参数".into(), None, 0,
             Some("boom".into()), Some("其他".into()),
         );
         assert_eq!(created.effect, None);
@@ -1347,7 +1306,7 @@ mod tests {
     #[test]
     fn todo_complete_toggles_flag() {
         let state = test_state();
-        let t = make_todo("完", "high", None, None, None);
+        let t = make_todo("完", None, None, None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
         let updated = todo_complete_sync(&state, id).unwrap();
@@ -1363,8 +1322,8 @@ mod tests {
     #[test]
     fn todo_delete_removes_by_id() {
         let state = test_state();
-        let t1 = make_todo("D1", "high", None, None, None);
-        let t2 = make_todo("D2", "low", None, None, None);
+        let t1 = make_todo("D1", None, None, None);
+        let t2 = make_todo("D2", None, None, None);
         let id1 = t1.id.clone();
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
@@ -1383,13 +1342,12 @@ mod tests {
     #[test]
     fn todo_update_modifies_all_fields() {
         let state = test_state();
-        let t = make_todo("旧标题", "high", None, None, None);
+        let t = make_todo("旧标题", None, None, None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
         let updated = todo_update_sync(
             &state, id,
             Some("新标题".into()),
-            Some("low".into()),
             Some(Some(3000000)),
             Some(1),
             Some(Some("daily".into())),
@@ -1397,7 +1355,6 @@ mod tests {
             Some(Some("生活".into())),
         );
         assert_eq!(updated.title, "新标题");
-        assert_eq!(updated.level, "low");
         assert_eq!(updated.due_at, Some(3000000));
         assert_eq!(updated.screen, 1);
         assert_eq!(updated.recurrence, Some("daily".to_string()));
@@ -1408,11 +1365,11 @@ mod tests {
     #[test]
     fn todo_update_rejects_invalid_effect() {
         let state = test_state();
-        let t = make_todo("坏特效", "high", None, Some("particle".into()), None);
+        let t = make_todo("坏特效", None, Some("particle".into()), None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
         let updated = todo_update_sync(
-            &state, id, None, None, None, None, None,
+            &state, id, None, None, None, None,
             Some(Some("invalid".into())), None,
         );
         assert_eq!(updated.effect, None);
@@ -1421,12 +1378,12 @@ mod tests {
     #[test]
     fn todo_update_rejects_invalid_tag() {
         let state = test_state();
-        let t = make_todo("坏标签", "high", None, None, Some("工作".into()));
+        let t = make_todo("坏标签", None, None, Some("工作".into()));
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
         let updated = todo_update_sync(
             &state, id, None, None, None, None, None,
-            None, Some(Some("无效".into())),
+            Some(Some("无效".into())),
         );
         assert_eq!(updated.tag, None);
     }
@@ -1434,8 +1391,8 @@ mod tests {
     #[test]
     fn todo_clear_completed_removes_only_completed() {
         let state = test_state();
-        let t1 = make_todo("未完成", "high", None, None, None);
-        let mut t2 = make_todo("已完成", "low", None, None, None);
+        let t1 = make_todo("未完成", None, None, None);
+        let mut t2 = make_todo("已完成", None, None, None);
         t2.completed = true;
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
@@ -1448,9 +1405,9 @@ mod tests {
     #[test]
     fn todo_batch_complete_updates_many() {
         let state = test_state();
-        let t1 = make_todo("B1", "high", None, None, None);
-        let t2 = make_todo("B2", "mid", None, None, None);
-        let t3 = make_todo("B3", "low", None, None, None);
+        let t1 = make_todo("B1", None, None, None);
+        let t2 = make_todo("B2", None, None, None);
+        let t3 = make_todo("B3", None, None, None);
         let ids = vec![t1.id.clone(), t2.id.clone(), t3.id.clone()];
         let batch_ids = vec![t1.id.clone(), t3.id.clone()];
         state.todos.lock().unwrap().push(t1);
@@ -1466,9 +1423,9 @@ mod tests {
     #[test]
     fn todo_batch_delete_removes_many() {
         let state = test_state();
-        let t1 = make_todo("R1", "high", None, None, None);
-        let t2 = make_todo("R2", "mid", None, None, None);
-        let t3 = make_todo("R3", "low", None, None, None);
+        let t1 = make_todo("R1", None, None, None);
+        let t2 = make_todo("R2", None, None, None);
+        let t3 = make_todo("R3", None, None, None);
         let ids_to_delete = vec![t1.id.clone(), t3.id.clone()];
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
@@ -1488,17 +1445,18 @@ mod tests {
     // ---------- 偏好设置 ----------
     #[test]
     fn preferences_default_values() {
-        let prefs = Preferences { default_screen: 0, default_level: "high".into(), theme: "system".into() };
-        assert_eq!(prefs.default_level, "high");
+        let prefs = Preferences { default_screen: 0, theme: "system".into() };
+        assert_eq!(prefs.default_screen, 0);
+        assert_eq!(prefs.theme, "system");
     }
 
     #[test]
     fn preferences_serialization_roundtrip() {
-        let prefs = Preferences { default_screen: 1, default_level: "low".into(), theme: "dark".into() };
+        let prefs = Preferences { default_screen: 1, theme: "dark".into() };
         let json = serde_json::to_string(&prefs).unwrap();
         let parsed: Preferences = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.default_screen, 1);
-        assert_eq!(parsed.default_level, "low");
+        assert_eq!(parsed.theme, "dark");
     }
 
     #[test]
@@ -1506,52 +1464,13 @@ mod tests {
         let json = r#"{}"#;
         let parsed: Preferences = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.default_screen, 0);
-        assert_eq!(parsed.default_level, "high");
-    }
-
-    // ---------- 特效调度确定性 ----------
-    #[test]
-    fn effect_deterministic_with_same_hash() {
-        let a = level_effect_from_hash("high", 42);
-        let b = level_effect_from_hash("high", 42);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn effect_variety_across_different_hash() {
-        let mut seen = std::collections::HashSet::new();
-        for i in 0..30 {
-            seen.insert(level_effect_from_hash("high", i));
-        }
-        assert!(seen.len() >= 3, "预期 high 产生 3 种特效，实际 {}", seen.len());
-
-        seen.clear();
-        for i in 0..30 {
-            seen.insert(level_effect_from_hash("mid", i));
-        }
-        assert!(seen.len() >= 4, "预期 mid 产生 4 种特效，实际 {}", seen.len());
-    }
-
-    #[test]
-    fn effect_with_due_deterministic() {
-        let a = level_effect_with_due("high", 2000000);
-        let b = level_effect_with_due("high", 2000000);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn different_due_gives_possibly_different_effect() {
-        let mut seen = std::collections::HashSet::new();
-        for due in 0..50 {
-            seen.insert(level_effect_with_due("high", due));
-        }
-        assert!(seen.len() >= 2);
+        assert_eq!(parsed.theme, "system");
     }
 
     // ---------- Danmaku payload ----------
     #[test]
     fn danmaku_payload_serialization() {
-        let d = DanmakuPayload { id: 42.0, text: "hello".into(), color: "#ff0000".into(), speed: 200.0 };
+        let d = DanmakuPayload { id: 42.0, text: "hello".into(), color: "#ff0000".into(), speed: 200.0, repeat_count: 3 };
         let json = serde_json::to_string(&d).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["id"].as_f64().unwrap(), 42.0);
@@ -1562,12 +1481,13 @@ mod tests {
     // ---------- Vfx payload ----------
     #[test]
     fn vfx_payload_serialization() {
-        let v = VfxPayload { id: 7.0, effect: "firework".into(), text: "boom".into(), color: "#ffaa00".into() };
+        let v = VfxPayload { id: 7.0, effect: "firework".into(), text: "boom".into(), color: "#ffaa00".into(), repeat_count: 3, play_duration: 2 };
         let json = serde_json::to_string(&v).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["id"].as_f64().unwrap(), 7.0);
         assert_eq!(parsed["effect"].as_str().unwrap(), "firework");
         assert_eq!(parsed["text"].as_str().unwrap(), "boom");
+        assert_eq!(parsed["repeat_count"].as_u64().unwrap(), 3);
     }
 
     // ---------- ScreenInfo ----------
@@ -1583,11 +1503,10 @@ mod tests {
     #[test]
     fn batch_complete_on_already_completed_is_idempotent() {
         let state = test_state();
-        let mut t = make_todo("已完成", "high", None, None, None);
+        let mut t = make_todo("已完成", None, None, None);
         t.completed = true;
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        // 再次 complete 不应增加计数
         assert_eq!(todo_batch_complete_sync(&state, vec![id]), 0);
     }
 
@@ -1601,9 +1520,8 @@ mod tests {
     #[test]
     fn created_todo_has_unique_ids() {
         let state = test_state();
-        let a = todo_create_sync(&state, "A".into(), "high".into(), None, 0, None, None);
-        let b = todo_create_sync(&state, "B".into(), "low".into(), None, 0, None, None);
+        let a = todo_create_sync(&state, "A".into(), None, 0, None, None);
+        let b = todo_create_sync(&state, "B".into(), None, 0, None, None);
         assert_ne!(a.id, b.id);
     }
 }
-
