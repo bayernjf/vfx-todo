@@ -184,15 +184,8 @@ fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, screen: i32, repeat_coun
         repeat_count: repeat_count.clamp(1, 10),
     };
     if screen < 0 {
-        // "全部" — emit to all overlay windows
-        for i in 0.. {
-            let label = format!("overlay-{}", i);
-            if app.get_webview_window(&label).is_some() {
-                let _ = app.emit_to(&label, "danmaku", payload.clone());
-            } else if i > 0 {
-                break;
-            }
-        }
+        // "全部" — 广播一次，每个 overlay 窗口各收到一次
+        let _ = app.emit("danmaku", payload);
     } else {
         let label = format!("overlay-{}", screen);
         if app.get_webview_window(&label).is_some() {
@@ -222,15 +215,8 @@ fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32, r
         effect, text, screen
     );
     if screen < 0 {
-        // "全部" — emit to all overlay windows
-        for i in 0.. {
-            let label = format!("overlay-{}", i);
-            if app.get_webview_window(&label).is_some() {
-                let _ = app.emit_to(&label, "vfx", payload.clone());
-            } else if i > 0 {
-                break;
-            }
-        }
+        // "全部" — 广播一次，每个 overlay 窗口各收到一次
+        let _ = app.emit("vfx", payload);
     } else {
         let label = format!("overlay-{}", screen);
         if app.get_webview_window(&label).is_some() {
