@@ -183,13 +183,23 @@ fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, screen: i32, repeat_coun
         speed: danmaku_speed.clamp(50.0, 250.0),
         repeat_count: repeat_count.clamp(1, 10),
     };
-    let label = format!("overlay-{}", screen);
-    // 注意：Tauri v2 中 WebviewWindow::emit 会广播给所有窗口
-    // 必须用 emit_to 精确指定目标窗口，否则三块屏会同时出现特效
-    if app.get_webview_window(&label).is_some() {
-        let _ = app.emit_to(&label, "danmaku", payload);
+    if screen < 0 {
+        // "全部" — emit to all overlay windows
+        for i in 0.. {
+            let label = format!("overlay-{}", i);
+            if app.get_webview_window(&label).is_some() {
+                let _ = app.emit_to(&label, "danmaku", payload.clone());
+            } else if i > 0 {
+                break;
+            }
+        }
     } else {
-        log::warn!("overlay-{} not found, danmaku dropped", screen);
+        let label = format!("overlay-{}", screen);
+        if app.get_webview_window(&label).is_some() {
+            let _ = app.emit_to(&label, "danmaku", payload);
+        } else {
+            log::warn!("overlay-{} not found, danmaku dropped", screen);
+        }
     }
 }
 
@@ -211,14 +221,25 @@ fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32, r
         "dispatch vfx: effect={} text={} screen={}",
         effect, text, screen
     );
-    let label = format!("overlay-{}", screen);
-    // 必须用 emit_to 精确指定目标窗口，避免广播到所有 overlay
-    if app.get_webview_window(&label).is_some() {
-        let _ = app.emit_to(&label, "vfx", payload);
+    if screen < 0 {
+        // "全部" — emit to all overlay windows
+        for i in 0.. {
+            let label = format!("overlay-{}", i);
+            if app.get_webview_window(&label).is_some() {
+                let _ = app.emit_to(&label, "vfx", payload.clone());
+            } else if i > 0 {
+                break;
+            }
+        }
     } else {
-        log::warn!("overlay-{} not found, fallback to overlay-0", screen);
-        if app.get_webview_window("overlay-0").is_some() {
-            let _ = app.emit_to("overlay-0", "vfx", payload);
+        let label = format!("overlay-{}", screen);
+        if app.get_webview_window(&label).is_some() {
+            let _ = app.emit_to(&label, "vfx", payload);
+        } else {
+            log::warn!("overlay-{} not found, fallback to overlay-0", screen);
+            if app.get_webview_window("overlay-0").is_some() {
+                let _ = app.emit_to("overlay-0", "vfx", payload);
+            }
         }
     }
 }
@@ -699,6 +720,18 @@ fn send_danmaku(app: tauri::AppHandle, text: String, color: String, speed: f64, 
         let _ = app.emit_to(&label, "danmaku", payload);
     } else {
         log::warn!("overlay-{} not found, danmaku dropped", target);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn flash_screen(app: tauri::AppHandle, screen: i32, screen_name: String) -> Result<(), String> {
+    if screen >= 0 {
+        let payload = serde_json::json!({ "screen_name": screen_name });
+        let label = format!("overlay-{}", screen);
+        if app.get_webview_window(&label).is_some() {
+            let _ = app.emit_to(&label, "screen-flash", payload);
+        }
     }
     Ok(())
 }
