@@ -664,6 +664,7 @@ function App() {
   const [customTime, setCustomTime] = useState(defaultDueTimeString());
   const customDateRef = useRef<HTMLInputElement>(null);
   const customTimeRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
@@ -805,6 +806,14 @@ function App() {
       el.setAttribute("data-theme", theme);
     }
   }, [theme]);
+
+  // 窗口聚焦时自动聚焦输入框
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onFocus = () => inputRef.current?.focus();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // 检测系统是否处于浅色模式（theme=system 时需要前端同步选色）
   const [prefersLight, setPrefersLight] = useState(false);
@@ -1257,6 +1266,7 @@ function App() {
           ))}
         </select>
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addTodo()}
