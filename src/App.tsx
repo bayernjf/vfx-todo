@@ -304,7 +304,7 @@ function EditForm({
           <option value={-1}>全部</option>
           {screens.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.is_primary ? "主屏" : `外接屏 ${s.id + 1}`}
+              {s.name}
             </option>
           ))}
         </select>
@@ -1208,15 +1208,14 @@ function App() {
           setTargetScreen(s);
           savePrefs({ ...prefs, default_screen: s });
           if (s >= 0) {
-            const label = screens.find((sc) => sc.id === s)?.is_primary
-              ? "主屏" : `外接屏 ${s + 1}`;
+            const label = screens.find((sc) => sc.id === s)?.name || `屏 ${s + 1}`;
             invoke("flash_screen", { screen: s, screenName: label }).catch(console.error);
           }
         }}>
           <option value={-1}>全部</option>
           {screens.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.is_primary ? "主屏" : `外接屏 ${s.id + 1}`}
+              {s.name}
             </option>
           ))}
         </select>
