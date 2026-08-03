@@ -682,7 +682,8 @@ fn set_current_effect(app: tauri::AppHandle, effect: String) -> Result<(), Strin
 #[cfg(target_os = "macos")]
 fn get_macos_screen_names() -> Vec<String> {
     extern "C" {
-        fn dispatch_get_main_queue() -> *mut std::ffi::c_void;
+        // dispatch_get_main_queue() 是宏，展开为 &_dispatch_main_q
+        static _dispatch_main_q: u8;
         fn dispatch_sync_f(
             queue: *mut std::ffi::c_void,
             context: *mut std::ffi::c_void,
@@ -714,7 +715,11 @@ fn get_macos_screen_names() -> Vec<String> {
     let mut ctx = Box::new(SyncContext { names: Vec::new() });
     let ctx_ptr = ctx.as_mut() as *mut SyncContext as *mut std::ffi::c_void;
     unsafe {
-        dispatch_sync_f(dispatch_get_main_queue(), ctx_ptr, work);
+        dispatch_sync_f(
+            &_dispatch_main_q as *const u8 as *mut std::ffi::c_void,
+            ctx_ptr,
+            work,
+        );
     }
     ctx.names
 }
