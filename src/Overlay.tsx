@@ -10,6 +10,7 @@ interface DanmakuItem {
   speed: number;
   width: number;
   lane: number;
+  repeatRemaining: number;
 }
 
 // 支持的特效类型（与后端 Rust VfxPayload.effect 保持一致）
@@ -27,6 +28,7 @@ interface VfxPayload {
   effect: EffectType;
   text: string;
   color: string;
+  repeat_count: number;
 }
 
 // ============ WebGL 特效引擎 ============
@@ -93,7 +95,7 @@ void main() {
 }
 `;
 
-// 粒子聚合特效 shader：粒子从四周向中心聚集，形成文字光晕
+// 粒子特效 shader：稀疏光点原地缓慢呼吸，中心柔光渐亮，无聚拢位移
 const PARTICLE_FRAG_SRC = `
 precision mediump float;
 uniform vec2 u_resolution;
@@ -111,36 +113,33 @@ void main() {
   vec2 toCenter = uv - u_center;
   float dist = length(toCenter);
 
-  // 粒子：更稀疏的多层网格，节奏舒缓
+  // 稀疏光点：原地极缓呼吸，不做大幅移动
   float particles = 0.0;
-  for (float i = 1.0; i <= 4.0; i++) {
-    vec2 grid = uv * (16.0 * i) + u_seed * i;
+  for (float i = 1.0; i <= 3.0; i++) {
+    vec2 grid = uv * (10.0 * i) + u_seed * i;
     vec2 cell = floor(grid);
     vec2 cellUv = fract(grid) - 0.5;
     float r = hash(cell + i);
-    vec2 offset = vec2(hash(cell), hash(cell + 1.0)) - 0.5;
-    float pull = 1.0 - u_time;
-    vec2 pos = cellUv + offset * pull * 0.25;
-    float d = length(pos);
-    float size = (0.12 + r * 0.08) * (1.0 - u_time * 0.6);
-    particles += smoothstep(size, size * 0.4, d) * r;
+    float breathe = 0.75 + 0.25 * sin(u_time * 1.4 + r * 6.2831);
+    float d = length(cellUv);
+    float size = (0.10 + r * 0.06) * breathe;
+    particles += smoothstep(size, size * 0.3, d) * r;
   }
 
-  // 中心光晕：聚集时变亮
-  float glow = exp(-dist * 5.0) * u_time;
-  float flash = exp(-u_time * 3.0) * 0.12;
+  // 中心柔光：缓慢增强并保持，不做突然闪亮
+  float glow = exp(-dist * 6.0) * smoothstep(0.0, 0.5, u_time) * 0.5;
 
-  vec3 color = u_color * particles * 0.9;
-  color += u_color * glow * 0.7;
-  color += mix(u_color, vec3(1.0), 0.25) * flash;
+  vec3 color = u_color * particles * 0.55;
+  color += u_color * glow * 0.6;
 
-  float fadeIn = smoothstep(0.0, 0.06, u_time);
-  float alpha = max(particles * 0.6, max(glow, flash)) * fadeIn;
+  float fadeIn = smoothstep(0.0, 0.12, u_time);
+  float fadeOut = 1.0 - smoothstep(0.8, 1.0, u_time);
+  float alpha = max(particles * 0.4, glow) * fadeIn * fadeOut;
   gl_FragColor = vec4(color * fadeIn, alpha);
 }
 `;
 
-// 雨滴特效
+// 雨滴特效：缓慢、柔和、低对比，无横向摆动
 const RAIN_FRAG_SRC = `
 precision mediump float;
 uniform vec2 u_resolution;
@@ -151,15 +150,17 @@ float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
   float rain = 0.0;
-  for (float i = 1.0; i <= 5.0; i++) {
-    float speed = 0.3 + i * 0.08;
-    float x = hash(vec2(i, u_seed)) + sin(u_time * 0.25 + i) * 0.08;
-    float y = fract(uv.x * (6.0 + i * 2.5) + x + u_time * speed);
-    float drop = smoothstep(0.03, 0.0, abs(uv.y - y)) * smoothstep(0.35, 0.0, length(uv - vec2(x, y)));
+  for (float i = 1.0; i <= 4.0; i++) {
+    float speed = 0.12 + i * 0.03;          // 更慢的下落
+    float x = hash(vec2(i, u_seed));         // 固定横向位置，不做摆动
+    float y = fract(uv.x * (4.0 + i * 1.5) + x + u_time * speed);
+    float drop = smoothstep(0.06, 0.0, abs(uv.y - y)) * smoothstep(0.5, 0.0, length(uv - vec2(x, y)));
     rain += drop;
   }
-  float fadeIn = smoothstep(0.0, 0.1, u_time);
-  gl_FragColor = vec4(u_color * (0.4 + rain * 1.4), rain * 0.32 + 0.04) * fadeIn;
+  float fadeIn = smoothstep(0.0, 0.15, u_time);
+  float fadeOut = 1.0 - smoothstep(0.8, 1.0, u_time);
+  // 降低整体亮度与对比，避免高频闪烁
+  gl_FragColor = vec4(u_color * (0.3 + rain * 0.7), (rain * 0.18 + 0.03) * fadeIn * fadeOut);
 }
 `;
 
@@ -232,7 +233,7 @@ void main() {
 }
 `;
 
-// 故障特效
+// 故障特效：极缓横向色带 + 轻微微粒，无横向错位跳变与高频闪烁
 const GLITCH_FRAG_SRC = `
 precision mediump float;
 uniform vec2 u_resolution;
@@ -243,23 +244,20 @@ float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
   float t = u_time;
-  float glitch = 0.0;
-  for (float i = 0.0; i < 6.0; i++) {
-    float y = hash(vec2(i, u_seed)) * 0.8 + 0.1;
-    float h = 0.008 + hash(vec2(i + 10.0, u_seed)) * 0.02;
-    // 错位位移大幅降低，避免横向抖动眩晕
-    float shift = (hash(vec2(i + 20.0, u_seed + floor(t * 6.0))) - 0.5) * 0.025 * (1.0 - t);
+  // 几条极缓慢横向色带，不做横向错位跳变
+  float bands = 0.0;
+  for (float i = 1.0; i <= 4.0; i++) {
+    float y = hash(vec2(i, u_seed)) * 0.7 + 0.15 + sin(t * 0.6 + i) * 0.02;
+    float h = 0.01 + hash(vec2(i + 10.0, u_seed)) * 0.015;
     float line = smoothstep(h, 0.0, abs(uv.y - y));
-    glitch += line;
-    if (abs(uv.y - y) < h) {
-      uv.x += shift;
-    }
+    bands += line * (0.6 + 0.4 * sin(t * 2.0 + i));
   }
-  float noise = hash(uv * 80.0 + floor(t * 12.0));
-  vec3 col = mix(u_color, vec3(noise), 0.12) * (1.0 + glitch * 0.8);
-  float fadeIn = smoothstep(0.0, 0.06, u_time);
+  // 极轻的缓慢微粒（无闪烁跳变）
+  float grain = hash(uv * 30.0 + u_seed) * 0.04;
+  vec3 col = u_color * (0.5 + bands * 0.5) + vec3(grain);
+  float fadeIn = smoothstep(0.0, 0.12, u_time);
   float fadeOut = 1.0 - smoothstep(0.75, 1.0, u_time);
-  gl_FragColor = vec4(col * fadeIn, (glitch + noise * 0.12) * (1.0 - t) * fadeIn * fadeOut);
+  gl_FragColor = vec4(col * fadeIn, (bands * 0.3 + grain) * fadeIn * fadeOut);
 }
 `;
 
@@ -279,11 +277,16 @@ class VfxEngine {
   private buffer: WebGLBuffer | null = null;
   private raf = 0;
   private startTime = 0;
-  private duration = 1500; // ms
+  private duration = 2000; // ms
   private currentProgram: WebGLProgram | null = null;
   private currentUniforms: Record<string, WebGLUniformLocation | null> = {};
   private currentColor: string = "#ff6b6b";
   private currentSeed = 0;
+  // 重复播放
+  private currentEffect: EffectType | null = null;
+  private repeatRemaining = 0;
+  private onRepeatDone: (() => void) | null = null;
+  private onPlaySound: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl", {
@@ -359,15 +362,27 @@ class VfxEngine {
     this.currentUniforms = uniforms;
   }
 
-  trigger(effect: EffectType, color: string) {
+  trigger(effect: EffectType, color: string, repeatCount: number = 1, onDone?: () => void, onPlaySound?: () => void) {
     if (!this.gl) return;
     const fragSrc = SHADER_MAP[effect];
     if (!fragSrc) {
       console.warn("VfxEngine: unknown effect", effect);
       return;
     }
+    this.currentEffect = effect;
     this.currentColor = color;
     this.currentSeed = Math.random() * 100;
+    this.repeatRemaining = repeatCount - 1;
+    this.onRepeatDone = onDone || null;
+    this.onPlaySound = onPlaySound || null;
+    onPlaySound?.();
+    this._doTrigger();
+  }
+
+  private _doTrigger() {
+    if (!this.gl || !this.currentEffect) return;
+    const fragSrc = SHADER_MAP[this.currentEffect];
+    if (!fragSrc) return;
     this.getOrBuildProgram(fragSrc);
 
     const dpr = window.devicePixelRatio;
@@ -409,6 +424,17 @@ class VfxEngine {
     } else {
       // 结束后清屏，释放 GPU
       gl.clear(gl.COLOR_BUFFER_BIT);
+      // 检查是否还有重复播放
+      if (this.repeatRemaining > 0) {
+        this.repeatRemaining--;
+        setTimeout(() => {
+          this.onPlaySound?.();
+          this._doTrigger();
+        }, 200);
+      } else if (this.onRepeatDone) {
+        this.onRepeatDone();
+        this.onRepeatDone = null;
+      }
     }
   };
 
@@ -599,6 +625,9 @@ function Overlay() {
   const itemsRef = useRef<DanmakuItem[]>([]);
   const vfxEngineRef = useRef<VfxEngine | null>(null);
   const [, setDebugInfo] = useState("init");
+  const [vfxText, setVfxText] = useState("");
+  const [vfxTextColor, setVfxTextColor] = useState("#ffffff");
+  const vfxTextTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     document.body.classList.add("overlay-mode");
@@ -643,7 +672,12 @@ function Overlay() {
           const it = items[i];
           it.x -= it.speed * dt * dpr;
           if (it.x + it.width < 0) {
-            items.splice(i, 1);
+            if (it.repeatRemaining > 0) {
+              it.repeatRemaining--;
+              it.x = danmakuCanvas.width;
+            } else {
+              items.splice(i, 1);
+            }
             continue;
           }
           ctx.fillStyle = it.color;
@@ -665,6 +699,10 @@ function Overlay() {
     }
 
     // 监听事件
+    // StrictMode 在开发模式下会 mount→unmount→mount 执行 effect 两次。
+    // listen 是异步的，cleanup 时可能还没注册完成，直接用 unlisten?.() 漏掉旧监听，
+    // 导致同一事件被注册两次 → 弹幕/特效出现两份。用 cancelled 标志兜底清理。
+    let cancelled = false;
     let unlistenDanmaku: (() => void) | undefined;
     let unlistenVfx: (() => void) | undefined;
 
@@ -707,20 +745,37 @@ function Overlay() {
           speed: p.speed,
           width,
           lane: bestLane,
+          repeatRemaining: (p as any).repeat_count ? (p as any).repeat_count - 1 : 0,
         });
       });
+      if (cancelled) {
+        u1();
+        return;
+      }
       unlistenDanmaku = u1;
 
       const u2 = await listen<VfxPayload>("vfx", (event) => {
         const p = event.payload;
-        vfxEngineRef.current?.trigger(p.effect, p.color);
-        playVfxSound(p.effect);
+        setVfxText(p.text);
+        setVfxTextColor(p.color);
+        clearTimeout(vfxTextTimerRef.current);
+        vfxEngineRef.current?.trigger(p.effect, p.color, p.repeat_count, () => {
+          setVfxText("");
+        }, () => {
+          playVfxSound(p.effect);
+        });
       });
+      if (cancelled) {
+        u2();
+        return;
+      }
       unlistenVfx = u2;
     })();
 
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
+      clearTimeout(vfxTextTimerRef.current);
       window.removeEventListener("resize", resize);
       unlistenDanmaku?.();
       unlistenVfx?.();
@@ -732,6 +787,11 @@ function Overlay() {
     <>
       <canvas ref={vfxCanvasRef} className="vfx-canvas" />
       <canvas ref={danmakuCanvasRef} className="overlay-canvas" />
+      {vfxText && (
+        <div className="vfx-text-overlay" style={{ color: vfxTextColor }}>
+          {vfxText}
+        </div>
+      )}
     </>
   );
 }
