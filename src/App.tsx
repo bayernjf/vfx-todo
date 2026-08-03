@@ -679,6 +679,7 @@ function App() {
 
   // 特效演示区（特效演示 + 弹幕）默认折叠，降低底部信息密度
   const [debugOpen, setDebugOpen] = useState(false);
+  const [personalizeOpen, setPersonalizeOpen] = useState(false);
 
   // Feature 3: 搜索
   const [searchQuery, setSearchQuery] = useState("");
@@ -1215,6 +1216,211 @@ function App() {
         )}
       </div>
 
+      <div className="panel-bar">
+        <button
+          className={`panel-toggle ${debugOpen ? "active" : ""}`}
+          onClick={() => { setDebugOpen(!debugOpen); if (!debugOpen) setPersonalizeOpen(false); }}
+          aria-expanded={debugOpen}
+        >
+          特效演示 {debugOpen ? "▴" : "▾"}
+        </button>
+        <button
+          className={`panel-toggle ${personalizeOpen ? "active" : ""}`}
+          onClick={() => { setPersonalizeOpen(!personalizeOpen); if (!personalizeOpen) setDebugOpen(false); }}
+          aria-expanded={personalizeOpen}
+        >
+          个性化 {personalizeOpen ? "▴" : "▾"}
+        </button>
+      </div>
+
+      {debugOpen && (
+        <div className="floating-panel debug-panel">
+          <div className="effect-panel">
+            <span className="due-label">特效演示：</span>
+            {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
+              <button
+                key={k}
+                className="effect-demo-btn"
+                style={{ borderColor: ec[k], color: ec[k] }}
+                onClick={() => previewEffect(k)}
+                title={`预览 ${EFFECT_LABEL[k]} 特效`}
+              >
+                {EFFECT_LABEL[k]}
+              </button>
+            ))}
+            <span className="effect-panel-hint">快捷键 ⌘⇧4/5/6/7/8</span>
+          </div>
+          <div className="danmaku-bar">
+            <input
+              value={danmakuInput}
+              onChange={(e) => setDanmakuInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendDanmaku()}
+              placeholder="直接发弹幕..."
+            />
+            <button onClick={sendDanmaku}>发送</button>
+          </div>
+        </div>
+      )}
+
+      {personalizeOpen && (
+        <div className="floating-panel personalize-panel">
+          <div className="due-presets">
+            <span className="due-label">到期提醒：</span>
+            {DUE_PRESETS.map((p) => (
+              <button
+                key={p.secs}
+                className={`due-btn ${dueInSecs === p.secs ? "active" : ""}`}
+                onClick={() => {
+                  setDueInSecs(dueInSecs === p.secs ? null : p.secs);
+                  setCustomDue("");
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+            <span className="due-datetime-group">
+              <input
+                ref={customDateRef}
+                type="date"
+                className="due-datetime"
+                value={customDate}
+                min={todayDateString()}
+                onFocus={() => {
+                  if (!customDue) {
+                    const d = defaultDueDateString();
+                    setCustomDate(d);
+                    if (customDateRef.current) customDateRef.current.value = d;
+                  }
+                }}
+                onChange={(e) => setCustomDate(e.target.value)}
+                onBlur={() => {
+                  const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+                  const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+                  const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+                  setCustomDate(d);
+                  setCustomTime(t);
+                  setCustomDue(`${d}T${t}`);
+                  setDueInSecs(null);
+                }}
+              />
+              <input
+                ref={customTimeRef}
+                type="time"
+                className="due-datetime"
+                value={customTime}
+                min={customDate === todayDateString() ? timeStringNow() : undefined}
+                onFocus={() => {
+                  if (!customDue) {
+                    const t = defaultDueTimeString();
+                    setCustomTime(t);
+                    if (customTimeRef.current) customTimeRef.current.value = t;
+                  }
+                }}
+                onChange={(e) => setCustomTime(e.target.value)}
+                onBlur={() => {
+                  const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+                  const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+                  const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+                  setCustomDate(d);
+                  setCustomTime(t);
+                  setCustomDue(`${d}T${t}`);
+                  setDueInSecs(null);
+                }}
+              />
+              <button
+                type="button"
+                className="due-btn"
+                onClick={() => {
+                  const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
+                  const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
+                  const { date: d, time: t } = validateDueDateTime(rawD, rawT);
+                  setCustomDate(d);
+                  setCustomTime(t);
+                  setCustomDue(`${d}T${t}`);
+                  setDueInSecs(null);
+                }}
+              >
+                确认
+              </button>
+            </span>
+            {(dueInSecs !== null || customDue) && (
+              <span className="due-hint">
+                {customDue
+                  ? `已选 ${new Date(customDue).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                  : `已选 ${dueInSecs! < 60 ? `${dueInSecs!}秒` : `${Math.round(dueInSecs! / 60)}分钟`}后触发`}
+              </span>
+            )}
+          </div>
+          <div className="recurrence-presets">
+            <span className="due-label">播放次数：</span>
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                className={`due-btn ${repeatCount === n ? "active" : ""}`}
+                onClick={() => setRepeatCount(n)}
+              >
+                {n}
+              </button>
+            ))}
+            <span className="repeat-stepper">
+              <button className="due-btn" disabled={repeatCount <= 1} onClick={() => setRepeatCount((c) => Math.max(1, c - 1))}>−</button>
+              <span className="repeat-count">{repeatCount}</span>
+              <button className="due-btn" disabled={repeatCount >= 10} onClick={() => setRepeatCount((c) => Math.min(10, c + 1))}>+</button>
+            </span>
+          </div>
+          <div className="recurrence-presets">
+            <span className="due-label">播放时长（非弹幕）：</span>
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                className={`due-btn ${playDuration === n ? "active" : ""}`}
+                onClick={() => setPlayDuration(n)}
+              >
+                {n}s
+              </button>
+            ))}
+            <span className="repeat-stepper">
+              <button className="due-btn" disabled={playDuration <= 1} onClick={() => setPlayDuration((c) => Math.max(1, c - 1))}>−</button>
+              <span className="repeat-count">{playDuration}s</span>
+              <button className="due-btn" disabled={playDuration >= 5} onClick={() => setPlayDuration((c) => Math.min(5, c + 1))}>+</button>
+            </span>
+          </div>
+          <div className="recurrence-presets">
+            <span className="due-label">弹幕速度：</span>
+            {[80, 120, 180].map((n) => (
+              <button
+                key={n}
+                className={`due-btn ${danmakuSpeed === n ? "active" : ""}`}
+                onClick={() => setDanmakuSpeed(n)}
+              >
+                {n === 80 ? "慢" : n === 120 ? "正常" : "快"}
+              </button>
+            ))}
+            <span className="repeat-stepper">
+              <button className="due-btn" disabled={danmakuSpeed <= 50} onClick={() => setDanmakuSpeed((c) => Math.max(50, c - 10))}>−</button>
+              <span className="repeat-count">{danmakuSpeed}</span>
+              <button className="due-btn" disabled={danmakuSpeed >= 250} onClick={() => setDanmakuSpeed((c) => Math.min(250, c + 10))}>+</button>
+            </span>
+          </div>
+          <div className="recurrence-presets">
+            <span className="due-label">重复：</span>
+            {[
+              { value: null, label: "不重复" },
+              { value: "daily", label: "每天" },
+              { value: "weekly", label: "每周" },
+            ].map((r) => (
+              <button
+                key={r.label}
+                className={`due-btn ${recurrence === r.value ? "active" : ""}`}
+                onClick={() => setRecurrence(r.value)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="todo-input">
         <select
           value={effect}
@@ -1269,240 +1475,19 @@ function App() {
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addTodo()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              addTodo();
+              setPersonalizeOpen(false);
+            }
+          }}
+          onFocus={() => {
+            setPersonalizeOpen(true);
+            setDebugOpen(false);
+          }}
           placeholder="输入待办内容，回车添加"
         />
-        <button onClick={addTodo}>添加</button>
-      </div>
-      <div className="due-presets">
-        <span className="due-label">到期提醒：</span>
-        {DUE_PRESETS.map((p) => (
-          <button
-            key={p.secs}
-            className={`due-btn ${dueInSecs === p.secs ? "active" : ""}`}
-            onClick={() => {
-              setDueInSecs(dueInSecs === p.secs ? null : p.secs);
-              setCustomDue("");
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
-        <span className="due-datetime-group">
-          <input
-            ref={customDateRef}
-            type="date"
-            className="due-datetime"
-            value={customDate}
-            min={todayDateString()}
-            onFocus={() => {
-              if (!customDue) {
-                const d = defaultDueDateString();
-                setCustomDate(d);
-                if (customDateRef.current) customDateRef.current.value = d;
-              }
-            }}
-            onChange={(e) => setCustomDate(e.target.value)}
-            onBlur={() => {
-              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
-              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
-              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
-              setCustomDate(d);
-              setCustomTime(t);
-              setCustomDue(`${d}T${t}`);
-              setDueInSecs(null);
-            }}
-          />
-          <input
-            ref={customTimeRef}
-            type="time"
-            className="due-datetime"
-            value={customTime}
-            min={customDate === todayDateString() ? timeStringNow() : undefined}
-            onFocus={() => {
-              if (!customDue) {
-                const t = defaultDueTimeString();
-                setCustomTime(t);
-                if (customTimeRef.current) customTimeRef.current.value = t;
-              }
-            }}
-            onChange={(e) => setCustomTime(e.target.value)}
-            onBlur={() => {
-              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
-              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
-              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
-              setCustomDate(d);
-              setCustomTime(t);
-              setCustomDue(`${d}T${t}`);
-              setDueInSecs(null);
-            }}
-          />
-          <button
-            type="button"
-            className="due-btn"
-            onClick={() => {
-              const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
-              const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
-              const { date: d, time: t } = validateDueDateTime(rawD, rawT);
-              setCustomDate(d);
-              setCustomTime(t);
-              setCustomDue(`${d}T${t}`);
-              setDueInSecs(null);
-            }}
-          >
-            确认
-          </button>
-        </span>
-        {(dueInSecs !== null || customDue) && (
-          <span className="due-hint">
-            {customDue
-              ? `已选 ${new Date(customDue).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-              : `已选 ${dueInSecs! < 60 ? `${dueInSecs!}秒` : `${Math.round(dueInSecs! / 60)}分钟`}后触发`}
-          </span>
-        )}
-      </div>
-      <div className="recurrence-presets">
-        <span className="due-label">播放次数：</span>
-        {[1, 2, 3].map((n) => (
-          <button
-            key={n}
-            className={`due-btn ${repeatCount === n ? "active" : ""}`}
-            onClick={() => setRepeatCount(n)}
-          >
-            {n}
-          </button>
-        ))}
-        <span className="repeat-stepper">
-          <button
-            className="due-btn"
-            disabled={repeatCount <= 1}
-            onClick={() => setRepeatCount((c) => Math.max(1, c - 1))}
-          >
-            −
-          </button>
-          <span className="repeat-count">{repeatCount}</span>
-          <button
-            className="due-btn"
-            disabled={repeatCount >= 10}
-            onClick={() => setRepeatCount((c) => Math.min(10, c + 1))}
-          >
-            +
-          </button>
-        </span>
-      </div>
-      <div className="recurrence-presets">
-        <span className="due-label">播放时长（非弹幕）：</span>
-        {[1, 2, 3].map((n) => (
-          <button
-            key={n}
-            className={`due-btn ${playDuration === n ? "active" : ""}`}
-            onClick={() => setPlayDuration(n)}
-          >
-            {n}s
-          </button>
-        ))}
-        <span className="repeat-stepper">
-          <button
-            className="due-btn"
-            disabled={playDuration <= 1}
-            onClick={() => setPlayDuration((c) => Math.max(1, c - 1))}
-          >
-            −
-          </button>
-          <span className="repeat-count">{playDuration}s</span>
-          <button
-            className="due-btn"
-            disabled={playDuration >= 5}
-            onClick={() => setPlayDuration((c) => Math.min(5, c + 1))}
-          >
-            +
-          </button>
-        </span>
-      </div>
-      <div className="recurrence-presets">
-        <span className="due-label">弹幕速度：</span>
-        {[80, 120, 180].map((n) => (
-          <button
-            key={n}
-            className={`due-btn ${danmakuSpeed === n ? "active" : ""}`}
-            onClick={() => setDanmakuSpeed(n)}
-          >
-            {n === 80 ? "慢" : n === 120 ? "正常" : "快"}
-          </button>
-        ))}
-        <span className="repeat-stepper">
-          <button
-            className="due-btn"
-            disabled={danmakuSpeed <= 50}
-            onClick={() => setDanmakuSpeed((c) => Math.max(50, c - 10))}
-          >
-            −
-          </button>
-          <span className="repeat-count">{danmakuSpeed}</span>
-          <button
-            className="due-btn"
-            disabled={danmakuSpeed >= 250}
-            onClick={() => setDanmakuSpeed((c) => Math.min(250, c + 10))}
-          >
-            +
-          </button>
-        </span>
-      </div>
-      <div className="recurrence-presets">
-        <span className="due-label">重复：</span>
-        {[
-          { value: null, label: "不重复" },
-          { value: "daily", label: "每天" },
-          { value: "weekly", label: "每周" },
-        ].map((r) => (
-          <button
-            key={r.label}
-            className={`due-btn ${recurrence === r.value ? "active" : ""}`}
-            onClick={() => setRecurrence(r.value)}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="debug-section">
-        <button
-          className="debug-toggle"
-          onClick={() => setDebugOpen((o) => !o)}
-          aria-expanded={debugOpen}
-        >
-          <span>特效演示</span>
-          <span className="debug-arrow">{debugOpen ? "▴" : "▾"}</span>
-        </button>
-        {debugOpen && (
-          <div className="debug-body">
-            <div className="effect-panel">
-              <span className="due-label">特效演示：</span>
-              {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
-                <button
-                  key={k}
-                  className="effect-demo-btn"
-                  style={{ borderColor: ec[k], color: ec[k] }}
-                  onClick={() => previewEffect(k)}
-                  title={`预览 ${EFFECT_LABEL[k]} 特效`}
-                >
-                  {EFFECT_LABEL[k]}
-                </button>
-              ))}
-              <span className="effect-panel-hint">快捷键 ⌘⇧4/5/6/7/8</span>
-            </div>
-
-            <div className="danmaku-bar">
-              <input
-                value={danmakuInput}
-                onChange={(e) => setDanmakuInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && sendDanmaku()}
-                placeholder="直接发弹幕..."
-              />
-              <button onClick={sendDanmaku}>发送</button>
-            </div>
-          </div>
-        )}
+        <button onClick={() => { addTodo(); setPersonalizeOpen(false); }}>添加</button>
       </div>
 
       <div className="console-hint">

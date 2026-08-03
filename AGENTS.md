@@ -61,3 +61,36 @@ cargo test            # Rust tests (run from src-tauri/)
 - **Performance:** WebGL shader caching, in-memory Rust cache with 5s background persist, TodoItem component isolation
 - **Theme:** Dark/Light/System via CSS variables
 - **Persistence:** JSON file in app data directory, in-memory cache with background flush
+
+## UI Layout: Floating Panel Design
+
+The bottom area uses two collapsible floating panels that expand upward:
+
+```
+待办列表
+─────────────────────────
+[特效演示 ▾]  [个性化 ▾]     ← click to expand upward
+─────────────────────────
+输入框 (increased height)
+```
+
+### Panel: 个性化 (Personalization)
+
+Contains parameter controls grouped together:
+- 到期提醒 (due time presets)
+- 播放次数 (repeat count)
+- 播放时长（非弹幕）(play duration)
+- 弹幕速度 (danmaku speed)
+- 重复 (recurrence)
+
+### Panel: 特效演示 (Effect Demo)
+
+Existing debug section with effect trigger buttons.
+
+### Interaction Rules
+
+1. **Mutual exclusion:** Only one panel can be expanded at a time. Expanding one auto-collapses the other.
+2. **Input focus trigger:** When the todo input gains focus, 个性化 auto-expands (特效演示 collapses).
+3. **Submit collapse:** Clicking 添加 or pressing Enter collapses 个性化.
+4. **Expand direction:** Panels float upward from the button position with semi-transparent background.
+5. **Manual toggle:** Clicking a panel header toggles its expand/collapse state.

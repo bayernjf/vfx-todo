@@ -419,7 +419,7 @@ describe("特效演示区", () => {
   it("显示特效演示折叠按钮", async () => {
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText("特效演示")).toBeTruthy();
+      expect(screen.getByText(/特效演示/)).toBeTruthy();
     });
   });
 });
