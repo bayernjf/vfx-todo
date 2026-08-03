@@ -828,14 +828,28 @@ function App() {
 
   useEffect(() => {
     refresh(filterTag || undefined);
-    invoke<ScreenInfo[]>("list_screens")
-      .then(setScreens)
-      .catch(console.error);
+    const refreshScreens = () => {
+      invoke<ScreenInfo[]>("list_screens")
+        .then(setScreens)
+        .catch(console.error);
+    };
+    refreshScreens();
+    // 定期刷新屏幕列表，检测热插拔
+    const screenTimer = setInterval(refreshScreens, 5000);
     const un = listen("todos-updated", () => refresh(filterTag || undefined));
     return () => {
+      clearInterval(screenTimer);
       un.then((f) => f());
     };
   }, [filterTag]);
+
+  // 选中的屏幕被拔掉时自动切回"全部"
+  useEffect(() => {
+    if (targetScreen >= 0 && screens.length > 0 && !screens.some((s) => s.id === targetScreen)) {
+      setTargetScreen(-1);
+      savePrefs({ ...prefs, default_screen: -1 });
+    }
+  }, [screens, targetScreen]);
 
   const addTodo = async () => {
     const title = input.trim();
