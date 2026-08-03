@@ -149,7 +149,7 @@ describe("创建", () => {
     const input = screen.getByPlaceholderText("输入待办内容，回车添加");
     await userEvent.type(input, "到期{Enter}");
     await waitFor(() => expect(screen.getByText("到期")).toBeTruthy());
-    expect(capturedArgs.dueAt).toBeGreaterThan(Date.now() + 299000);
+    expect(capturedArgs.dueAt).toBeGreaterThan(Date.now() + 2000);
   });
 });
 
@@ -162,9 +162,9 @@ describe("到期时间", () => {
     expect(screen.getByText("+30m")).toBeTruthy();
   });
 
-  it("到期提示显示默认 5 分钟", async () => {
+  it("到期提示显示默认 3 秒", async () => {
     renderApp();
-    await waitFor(() => expect(screen.getByText(/5分钟后触发/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/3秒后触发/)).toBeTruthy());
   });
 });
 
@@ -431,8 +431,10 @@ describe("到期时间渲染", () => {
       todo_list: [mTodo({ id: "due1", title: "有到期", due_at: futureDue })],
     });
     await waitFor(() => expect(screen.getByText("有到期")).toBeTruthy());
-    // Should show countdown
-    expect(screen.getByText(/秒后/)).toBeTruthy();
+    // Should show countdown in .todo-due element
+    const dueEl = document.querySelector(".todo-due");
+    expect(dueEl).toBeTruthy();
+    expect(dueEl!.textContent).toMatch(/秒后/);
   });
 
   it("显示已到期的待办", async () => {

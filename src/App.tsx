@@ -655,7 +655,8 @@ function TodoItem({
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
-  const [dueInSecs, setDueInSecs] = useState<number | null>(300);
+  // BLOCKER: revert to 300 before production launch
+  const [dueInSecs, setDueInSecs] = useState<number | null>(3);
   const [customDue, setCustomDue] = useState("");
   const [customDate, setCustomDate] = useState(defaultDueDateString());
   const [customTime, setCustomTime] = useState(defaultDueTimeString());
@@ -857,7 +858,8 @@ function App() {
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
-    setDueInSecs(300); // 维持默认时长，下次新建仍带 5 分钟到期
+    // BLOCKER: revert to 300 before production launch
+    setDueInSecs(3);
     setCustomDue("");
     setCustomDate(defaultDueDateString());
     setCustomTime(defaultDueTimeString());
