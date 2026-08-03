@@ -177,9 +177,22 @@ fn js_sys_now() -> i64 {
 
 // ============ 弹幕/特效派发 ============
 
-// 弹幕/特效的默认颜色（等级概念已移除，统一使用固定默认值）
+// 弹幕默认颜色
 const DEFAULT_DANMAKU_COLOR: &str = "#ff6b6b";
-const DEFAULT_VFX_COLOR: &str = "#ff6b6b";
+
+/// VFX 特效随机配色表
+const VFX_COLOR_PALETTE: &[&str] = &[
+    "#ff6b6b", // 红
+    "#ffe66d", // 黄
+    "#4ecdc4", // 青
+    "#95e1d3", // 浅绿
+    "#88c0ff", // 蓝
+    "#ff9ff3", // 粉
+    "#a55eea", // 紫
+    "#f9ca24", // 橙
+    "#6abe6b", // 绿
+    "#ff8c42", // 橙红
+];
 
 fn dispatch_danmaku(app: &tauri::AppHandle, text: &str, screen: i32, repeat_count: u8, danmaku_speed: f64) {
     let payload = DanmakuPayload {
@@ -208,11 +221,12 @@ fn dispatch_vfx(app: &tauri::AppHandle, text: &str, effect: &str, screen: i32, r
         log::warn!("dispatch_vfx: unknown effect={}, ignored", effect);
         return;
     }
+    let color = VFX_COLOR_PALETTE[rand::random::<usize>() % VFX_COLOR_PALETTE.len()];
     let payload = VfxPayload {
         id: js_sys_now() as f64,
         effect: effect.to_string(),
         text: text.to_string(),
-        color: DEFAULT_VFX_COLOR.to_string(),
+        color: color.to_string(),
         repeat_count: repeat_count.clamp(1, 10),
         play_duration: play_duration.clamp(1, 5),
     };
