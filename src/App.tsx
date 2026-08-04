@@ -1491,7 +1491,13 @@ function App() {
           }}
           onBlur={(e) => {
             const related = e.relatedTarget as HTMLElement | null;
-            if (related && (related.closest(".panel-area") || related.closest(".todo-input"))) return;
+            // relatedTarget 为 null 表示焦点移到了 DOM 之外的原生控件（如系统日期 /
+            // 时间选择器、浏览器地址栏等）。输入框聚焦时个性化会自动展开，若此时
+            // 点击“到期时间”打开系统原生选择器，blur 会带着 null 的 relatedTarget
+            // 触发，若照常收起面板，原生选择器所在的日期输入框会被卸载而立即消失。
+            // 因此 relatedTarget 为 null 时不应收起。
+            if (!related) return;
+            if (related.closest(".panel-area") || related.closest(".todo-input")) return;
             setPersonalizeOpen(false);
           }}
           placeholder="输入待办内容，回车添加"
