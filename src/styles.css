@@ -731,6 +731,16 @@ body:not(.overlay-mode) {
   flex-wrap: wrap;
 }
 
+/* 个性化面板内各参数分组之间加大间距 */
+.personalize-panel .due-presets,
+.personalize-panel .recurrence-presets {
+  margin-bottom: 14px;
+}
+.personalize-panel .due-presets:last-child,
+.personalize-panel .recurrence-presets:last-child {
+  margin-bottom: 0;
+}
+
 /* 播放次数紧凑加减组 */
 .repeat-stepper {
   display: inline-flex;
