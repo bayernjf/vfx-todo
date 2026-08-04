@@ -23,3 +23,9 @@ src-tauri/gen
 test-results/
 playwright-report/
 coverage/
+
+# Tauri / Vite dev runtime artifacts
+.tauri-dev.log
+.tauri-dev.pid
+.vite-preview.log
+.vite-preview.pid
