@@ -1117,29 +1117,48 @@ body.overlay-mode {
   opacity: 0.85;
 }
 
+/* 浮窗面板区（作为浮窗定位锚点） */
+.panel-area {
+  position: relative;
+}
+
 /* 浮窗面板栏 */
 .panel-bar {
   display: flex;
   gap: 8px;
   padding: 4px 12px;
+  justify-content: space-between;
 }
 .panel-toggle {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  border: 1px solid var(--glass-18);
+  border-radius: 8px;
+  background: var(--glass-08);
+  color: var(--text-dim-80);
   cursor: pointer;
   font-size: 0.85rem;
   font-family: inherit;
-  transition: all 0.15s;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: all 0.18s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 .panel-toggle:hover {
-  background: var(--hover);
-}
-.panel-toggle.active {
+  background: var(--glass-15);
   border-color: var(--accent);
   color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(96, 84, 241, 0.25);
+}
+.panel-toggle.active {
+  background: linear-gradient(135deg, rgba(96, 84, 241, 0.95), rgba(96, 84, 241, 0.7));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(96, 84, 241, 0.4);
 }
 
 /* 浮窗面板（向上展开） */
