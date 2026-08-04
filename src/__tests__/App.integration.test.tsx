@@ -3,7 +3,7 @@
  * 覆盖：创建/搜索/排序/已完成管理/标签筛选/批量操作/编辑/undo/新参数
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 let invokeStore: Record<string, unknown> = {};
@@ -532,6 +532,33 @@ describe("重复设置", () => {
     await userEvent.type(input, "重复任务{Enter}");
     await waitFor(() => expect(screen.getByText("重复任务")).toBeTruthy());
     expect(capturedArgs.recurrence).toBe("daily");
+  });
+});
+
+describe("个性化面板聚焦/失焦", () => {
+  it("输入框聚焦时展开个性化面板", async () => {
+    renderApp();
+    await waitFor(() => expect(screen.getByText(/个性化/)).toBeTruthy());
+    const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    fireEvent.focus(input);
+    await waitFor(() => expect(screen.getByText("到期提醒：")).toBeTruthy());
+  });
+
+  it("失焦到原生控件(relatedTarget=null)保持展开，失焦到面板外才收起", async () => {
+    renderApp();
+    const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    fireEvent.focus(input);
+    await waitFor(() => expect(screen.getByText("到期提醒：")).toBeTruthy());
+
+    // 点击系统原生日期/时间选择器时，blur 的 relatedTarget 为 null（原生控件不在 DOM 中）。
+    // 此前会因此误判收起面板，导致选择器刚打开就被卸载。修复后应保持展开。
+    fireEvent.blur(input, { relatedTarget: null });
+    await waitFor(() => expect(screen.getByText("到期提醒：")).toBeTruthy());
+
+    // 真正点击面板外的 DOM 元素（如待办列表区）时应收起
+    const outside = document.querySelector(".todo-list") as HTMLElement;
+    fireEvent.blur(input, { relatedTarget: outside });
+    await waitFor(() => expect(screen.queryByText("到期提醒：")).toBeFalsy());
   });
 });
 
