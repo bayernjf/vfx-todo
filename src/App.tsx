@@ -1473,6 +1473,9 @@ function App() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="todo-input">
         <input
           ref={inputRef}
           value={input}
@@ -1480,16 +1483,20 @@ function App() {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               addTodo();
-              setPersonalizeOpen(false);
             }
           }}
           onFocus={() => {
             setPersonalizeOpen(true);
             setDebugOpen(false);
           }}
+          onBlur={(e) => {
+            const related = e.relatedTarget as HTMLElement | null;
+            if (related && (related.closest(".panel-area") || related.closest(".todo-input"))) return;
+            setPersonalizeOpen(false);
+          }}
           placeholder="输入待办内容，回车添加"
         />
-        <button onClick={() => { addTodo(); setPersonalizeOpen(false); }}>添加</button>
+        <button onClick={() => addTodo()}>添加</button>
       </div>
 
       <div className="console-hint">
