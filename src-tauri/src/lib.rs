@@ -873,13 +873,25 @@ fn send_danmaku(app: tauri::AppHandle, text: String, color: String, speed: f64, 
         speed,
         repeat_count: 1,
     };
-    let target = screen.unwrap_or(0);
-    let label = format!("overlay-{}", target);
-    // 用 emit_to 精确发给指定 overlay，避免广播到所有屏幕
-    if app.get_webview_window(&label).is_some() {
-        let _ = app.emit_to(&label, "danmaku", payload);
-    } else {
-        log::warn!("overlay-{} not found, danmaku dropped", target);
+    match screen {
+        Some(s) if s < 0 => {
+            // "全部" — 广播到所有 overlay 窗口（与 VFX 派发逻辑一致）
+            let _ = app.emit("danmaku", payload);
+        }
+        Some(s) => {
+            let label = format!("overlay-{}", s);
+            if app.get_webview_window(&label).is_some() {
+                let _ = app.emit_to(&label, "danmaku", payload);
+            } else {
+                log::warn!("overlay-{} not found, fallback to overlay-0", s);
+                if app.get_webview_window("overlay-0").is_some() {
+                    let _ = app.emit_to("overlay-0", "danmaku", payload);
+                }
+            }
+        }
+        None => {
+            let _ = app.emit_to("overlay-0", "danmaku", payload);
+        }
     }
     Ok(())
 }
