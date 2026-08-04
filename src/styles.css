@@ -1180,9 +1180,35 @@ body.overlay-mode {
   overflow-y: auto;
 }
 
+/* 输入框上方配置行：特效 / 屏幕 / 标签 */
+.input-config {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 4px;
+}
+
+.input-config select {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 8px;
+  border: 1px solid var(--glass-18);
+  border-radius: 6px;
+  background: var(--glass-08);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  text-align: center;
+  text-align-last: center;
+}
+
 /* 输入框增高 */
 .todo-input {
   min-height: 56px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 12px;
 }
 
 /* 屏幕选择闪边反馈 */
