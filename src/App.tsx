@@ -261,6 +261,7 @@ function EditForm({
   );
   const customDateRef = useRef<HTMLInputElement>(null);
   const customTimeRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
   const commitCustom = () => {
     const rawD = customDateRef.current?.value || customDate || defaultDueDateString();
     const rawT = customTimeRef.current?.value || customTime || defaultDueTimeString();
@@ -278,7 +279,13 @@ function EditForm({
         onChange={(e) => onChange({ title: e.target.value })}
         placeholder="待办标题"
         autoFocus
-        onKeyDown={(e) => e.key === "Enter" && onSave()}
+        onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && !composingRef.current && onSave()}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
       />
       <div className="edit-row">
         <select
@@ -665,6 +672,10 @@ function App() {
   const customDateRef = useRef<HTMLInputElement>(null);
   const customTimeRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Tracks IME composition (Chinese pinyin) state so Enter used to confirm a
+  // candidate is not mistaken for a submit. Some IMEs report isComposing=false
+  // on that keydown, so we track it explicitly via composition events.
+  const composingRef = useRef(false);
   const [danmakuInput, setDanmakuInput] = useState("");
   const [danmakuCount, setDanmakuCount] = useState(0);
   const [screens, setScreens] = useState<ScreenInfo[]>([]);
@@ -1255,7 +1266,13 @@ function App() {
             <input
               value={danmakuInput}
               onChange={(e) => setDanmakuInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendDanmaku()}
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && !composingRef.current && sendDanmaku()}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
               placeholder="直接发弹幕..."
             />
             <button onClick={sendDanmaku}>发送</button>
@@ -1481,9 +1498,20 @@ function App() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (
+              e.key === "Enter" &&
+              !e.nativeEvent.isComposing &&
+              e.nativeEvent.keyCode !== 229 &&
+              !composingRef.current
+            ) {
               addTodo();
             }
+          }}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
           }}
           onFocus={() => {
             setPersonalizeOpen(true);
