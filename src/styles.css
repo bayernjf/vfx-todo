@@ -169,6 +169,7 @@ body:not(.overlay-mode) {
 /* ============ ToDo 列表 ============ */
 .todo-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
