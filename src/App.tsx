@@ -1216,6 +1216,7 @@ function App() {
         )}
       </div>
 
+      <div className="panel-area">
       <div className="panel-bar">
         <button
           className={`panel-toggle ${debugOpen ? "active" : ""}`}
@@ -1420,8 +1421,9 @@ function App() {
           </div>
         </div>
       )}
+      </div>
 
-      <div className="todo-input">
+      <div className="input-config">
         <select
           value={effect}
           onChange={(e) => {
