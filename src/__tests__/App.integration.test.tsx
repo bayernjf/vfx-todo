@@ -92,8 +92,8 @@ beforeEach(() => {
 
 // DOM helpers
 function getEffectSelect(): HTMLSelectElement {
-  // effect select is the first select inside .todo-input
-  return document.querySelector(".todo-input select") as HTMLSelectElement;
+  // effect select is the first select inside .input-config
+  return document.querySelector(".input-config select") as HTMLSelectElement;
 }
 
 describe("基础渲染", () => {
