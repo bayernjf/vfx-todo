@@ -22,17 +22,17 @@ test.describe("Multi-Screen Support", () => {
       () => (window as any).__MOCK__.invokeCount("list_screens") > 0
     );
 
-    // Create-form screen <select> should expose 3 options
-    const screenSelect = page.locator(".todo-input select").nth(1);
+    // Create-form screen <select> should expose 4 options (全部 + 3 screens)
+    const screenSelect = page.locator(".input-config select").nth(1);
     await expect(screenSelect).toBeVisible();
-    await expect(screenSelect.locator("option")).toHaveCount(3);
+    await expect(screenSelect.locator("option")).toHaveCount(4);
   });
 
   test("creating a todo targets the selected screen", async ({ page }) => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
 
-    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 2" });
+    await page.locator(".input-config select").nth(1).selectOption({ label: "屏 2" });
 
     await page.locator(TITLE_INPUT).fill("Screen-bound task");
     await page.locator(ADD_BUTTON).click();
@@ -50,9 +50,9 @@ test.describe("Multi-Screen Support", () => {
   test("sending danmaku routes to the selected screen", async ({ page }) => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
-    await page.locator(".debug-toggle").click();
+    await page.locator('.panel-toggle:has-text("特效演示")').click();
 
-    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 2" });
+    await page.locator(".input-config select").nth(1).selectOption({ label: "屏 2" });
     await page.locator('.danmaku-bar input[placeholder="直接发弹幕..."]').fill("hello multi-screen");
 
     await page.locator('.danmaku-bar button:has-text("发送")').click();
@@ -66,9 +66,9 @@ test.describe("Multi-Screen Support", () => {
   test("preview effect routes to the selected screen", async ({ page }) => {
     await setupPage(page, { screens: THREE_SCREENS });
     await page.goto("/");
-    await page.locator(".debug-toggle").click();
+    await page.locator('.panel-toggle:has-text("特效演示")').click();
 
-    await page.locator(".todo-input select").nth(1).selectOption({ label: "屏 3" });
+    await page.locator(".input-config select").nth(1).selectOption({ label: "屏 3" });
     // First effect-demo button (EFFECT_LABEL order) previews that effect
     await page.locator(".effect-demo-btn").first().click();
     await page.waitForTimeout(150);

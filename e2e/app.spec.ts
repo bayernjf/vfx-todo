@@ -128,8 +128,8 @@ test.describe("Todo CRUD", () => {
     await setupPage(page);
     await page.goto("/");
 
-    // Select a tag from dropdown (3rd select in the form)
-    const tagSelects = page.locator(".todo-input select");
+    // Select a tag from dropdown (3rd select in .input-config)
+    const tagSelects = page.locator(".input-config select");
     const tagSelect = tagSelects.nth(2);
     await tagSelect.selectOption("工作");
 
