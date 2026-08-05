@@ -150,6 +150,9 @@ const DUE_PRESETS: { label: string; secs: number }[] = [
   { label: "+30m", secs: 1800 },
 ];
 
+// 新建待办默认到期延迟（秒）。BLOCKER: 上线前改回 300
+const DEFAULT_DUE_SECS = 3;
+
 // ══════════════════════════════════════════
 // 工具函数
 // ══════════════════════════════════════════
@@ -664,8 +667,7 @@ function TodoItem({
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
-  // BLOCKER: revert to 300 before production launch
-  const [dueInSecs, setDueInSecs] = useState<number | null>(3);
+  const [dueInSecs, setDueInSecs] = useState<number | null>(DEFAULT_DUE_SECS);
   const [customDue, setCustomDue] = useState("");
   const [customDate, setCustomDate] = useState(defaultDueDateString());
   const [customTime, setCustomTime] = useState(defaultDueTimeString());
@@ -900,8 +902,7 @@ function App() {
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
-    // BLOCKER: revert to 300 before production launch
-    setDueInSecs(3);
+    setDueInSecs(DEFAULT_DUE_SECS);
     setCustomDue("");
     setCustomDate(defaultDueDateString());
     setCustomTime(defaultDueTimeString());
