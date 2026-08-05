@@ -562,3 +562,66 @@ describe("个性化面板聚焦/失焦", () => {
   });
 });
 
+describe("已完成快捷动作", () => {
+  it("重复图标按原配置重复添加（新建同样待办，按默认延迟重新触发）", async () => {
+    let captured: Record<string, unknown> = {};
+    renderApp({
+      todo_list: [
+        mTodo({
+          id: "dup1",
+          title: "再跑一次",
+          completed: true,
+          effect: "firework",
+          tag: "工作",
+          screen: 1,
+          recurrence: "daily",
+          repeat_count: 3,
+          play_duration: 4,
+          danmaku_speed: 180,
+          due_at: now_ts - 1000,
+        }),
+      ],
+      todo_create: (args: Record<string, unknown>) => {
+        captured = args || {};
+        return mTodo({ id: "dup2", title: args?.title as string, completed: false });
+      },
+    });
+    await waitFor(() => expect(screen.getByText("再跑一次")).toBeTruthy());
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "按原配置重复添加" })
+    );
+
+    await waitFor(() => expect(captured.title).toBe("再跑一次"));
+    // 原配置全部保留
+    expect(captured.effect).toBe("firework");
+    expect(captured.tag).toBe("工作");
+    expect(captured.screen).toBe(1);
+    expect(captured.recurrence).toBe("daily");
+    expect(captured.repeatCount).toBe(3);
+    expect(captured.playDuration).toBe(4);
+    expect(captured.danmakuSpeed).toBe(180);
+    // 新建实例带到期时间（按默认延迟），会照常触发特效，而非 null
+    expect(typeof captured.dueAt).toBe("number");
+    expect(captured.dueAt as number).toBeGreaterThan(now_ts);
+    // 新建的是未完成实例，应出现「完成」按钮
+    await waitFor(() => expect(screen.getByText("完成")).toBeTruthy());
+  });
+
+  it("向下图标一键把标题填充到输入框", async () => {
+    renderApp({
+      todo_list: [mTodo({ id: "f1", title: "填充这个", completed: true })],
+    });
+    await waitFor(() => expect(screen.getByText("填充这个")).toBeTruthy());
+
+    const input = screen.getByPlaceholderText(
+      "输入待办内容，回车添加"
+    ) as HTMLInputElement;
+    expect(input.value).toBe("");
+
+    await userEvent.click(screen.getByRole("button", { name: "填充到输入框" }));
+
+    expect(input.value).toBe("填充这个");
+  });
+});
+

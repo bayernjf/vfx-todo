@@ -211,6 +211,11 @@ body:not(.overlay-mode) {
   opacity: 0.4;
 }
 
+/* hover 时提亮已完成项，让显出的快捷图标清晰可见 */
+.todo-item.completed:hover {
+  opacity: 0.9;
+}
+
 .todo-item.completed .todo-title {
   text-decoration: line-through;
 }
@@ -289,6 +294,59 @@ body:not(.overlay-mode) {
   font-size: 11px;
   color: var(--text-dim-45);
   font-variant-numeric: tabular-nums;
+}
+
+/* ============ 已完成待办快捷动作（hover 显出） ============ */
+.todo-quick-actions {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.todo-item.completed:hover .todo-quick-actions {
+  display: inline-flex;
+}
+.todo-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--glass-18);
+  border-radius: 5px;
+  background: var(--glass-08);
+  color: var(--text-dim-65);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.todo-action-icon:hover {
+  background: rgba(96, 84, 241, 0.2);
+  border-color: rgba(96, 84, 241, 0.5);
+  color: var(--accent);
+}
+
+/* 图标悬浮浮窗（跟随鼠标，定位在光标左上角；fixed 以逃出滚动列表裁剪） */
+.icon-tip-host {
+  position: relative;
+  display: inline-flex;
+}
+.icon-tip {
+  position: fixed;
+  transform: translateY(-100%);
+  z-index: 1000;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-30);
+  border-radius: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 /* ============ 内联编辑表单 ============ */

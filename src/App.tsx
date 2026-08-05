@@ -1,4 +1,5 @@
 import { Component, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -486,6 +487,32 @@ function EditForm({
 // TodoItem
 // ══════════════════════════════════════════
 
+// 图标悬浮提示（浮窗跟随鼠标，定位在光标左上角）
+
+function IconTip({ tip, children }: { tip: string; children: React.ReactNode }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <span
+      className="icon-tip-host"
+      onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos &&
+        createPortal(
+          <span
+            className="icon-tip"
+            style={{ right: window.innerWidth - pos.x + 12, top: pos.y - 12 }}
+          >
+            {tip}
+          </span>,
+          document.body
+        )}
+    </span>
+  );
+}
+
 function TodoItem({
   todo,
   screens,
@@ -493,6 +520,8 @@ function TodoItem({
   onDelete,
   onTrigger,
   onUpdate,
+  onDuplicate,
+  onFillInput,
   selected,
   onToggleSelect,
   dragOverId,
@@ -509,6 +538,8 @@ function TodoItem({
   onDelete: (id: string) => void;
   onTrigger: (todo: Todo) => void;
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
+  onDuplicate: (todo: Todo) => void;
+  onFillInput: (todo: Todo) => void;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   dragOverId: string | null;
@@ -652,6 +683,28 @@ function TodoItem({
             完成
           </button>
         </>
+      )}
+      {todo.completed && (
+        <span className="todo-quick-actions">
+          <IconTip tip="按原配置重复添加">
+            <button
+              className="todo-action-icon"
+              onClick={() => onDuplicate(todo)}
+              aria-label="按原配置重复添加"
+            >
+              ⟳
+            </button>
+          </IconTip>
+          <IconTip tip="填充到输入框">
+            <button
+              className="todo-action-icon"
+              onClick={() => onFillInput(todo)}
+              aria-label="填充到输入框"
+            >
+              ↓
+            </button>
+          </IconTip>
+        </span>
       )}
       <button className="todo-btn delete" onClick={() => onDelete(todo.id)}>
         删除
@@ -913,6 +966,29 @@ function App() {
     setRepeatCount(1);
     setPlayDuration(2);
     setDanmakuSpeed(120);
+  };
+
+  // 已完成待办：按原配置重复添加（等同于新建一个同样的待办，按默认到期延迟重新触发特效）
+  const duplicateTodo = async (todo: Todo) => {
+    const dueAt = Date.now() + (dueInSecs ?? DEFAULT_DUE_SECS) * 1000;
+    const created = await invoke<Todo>("todo_create", {
+      title: todo.title,
+      dueAt,
+      screen: todo.screen ?? 0,
+      recurrence: todo.recurrence ?? null,
+      effect: todo.effect ?? null,
+      tag: todo.tag ?? null,
+      repeatCount: todo.repeat_count ?? 1,
+      playDuration: todo.play_duration ?? 2,
+      danmakuSpeed: todo.danmaku_speed ?? 120,
+    });
+    setTodos((prev) => [...prev, created]);
+  };
+
+  // 已完成待办：一键把标题填充到输入框
+  const fillInput = (todo: Todo) => {
+    setInput(todo.title);
+    inputRef.current?.focus();
   };
 
   const completeTodo = async (id: string) => {
@@ -1215,6 +1291,8 @@ function App() {
               onDelete={deleteTodo}
               onTrigger={triggerTodoDanmaku}
               onUpdate={updateTodo}
+              onDuplicate={duplicateTodo}
+              onFillInput={fillInput}
               selected={selectedIds.has(todo.id)}
               onToggleSelect={toggleSelect}
               dragOverId={dragOverId}
