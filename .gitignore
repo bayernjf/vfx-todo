@@ -3,6 +3,12 @@ dist
 dist-ssr
 *.local
 
+# TypeScript build artifacts
+*.tsbuildinfo
+# tsc -b 误把 vite.config.ts 编译出来的产物（修好 tsconfig.node.json 后不再生成）
+vite.config.js
+vite.config.d.ts
+
 # Editor
 .vscode/*
 !.vscode/extensions.json
@@ -12,3 +18,16 @@ dist-ssr
 # Tauri / Rust
 src-tauri/target
 src-tauri/gen
+# 本地 cargo 镜像配置（国内加速），不提交以免影响 CI/其他贡献者
+.cargo/config.toml
+
+# E2E test artifacts
+test-results/
+playwright-report/
+coverage/
+
+# Tauri / Vite dev runtime artifacts
+.tauri-dev.log
+.tauri-dev.pid
+.vite-preview.log
+.vite-preview.pid
