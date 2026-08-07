@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{Emitter, Listener, Manager, WebviewWindowBuilder};
-use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 
@@ -104,12 +104,24 @@ struct Preferences {
     /// 默认特效：danmaku / shatter / particle / rain / firework / ripple / laser / glitch
     #[serde(default = "default_effect")]
     default_effect: String,
+    /// 唤出主窗口的全局快捷键（Tauri 快捷键字符串，如 "Cmd+Shift+K" / "Ctrl+Shift+K"）。None=未设置。
+    #[serde(default)]
+    summon_shortcut: Option<String>,
 }
 fn default_theme() -> String {
     "system".to_string()
 }
 fn default_effect() -> String {
     "danmaku".to_string()
+}
+
+/// 唤出主窗口的默认全局快捷键：Mac 用 Cmd+T，Windows/Linux 用 Alt+T（自动识别平台）
+fn default_summon_shortcut() -> String {
+    if std::env::consts::OS == "macos" {
+        "Cmd+T".to_string()
+    } else {
+        "Alt+T".to_string()
+    }
 }
 
 #[derive(Clone)]
@@ -120,6 +132,8 @@ struct AppState {
     warned_ids: std::sync::Arc<std::sync::Mutex<HashSet<String>>>,
     /// 前端特效下拉当前选中的特效，供全局快捷键 ⌘⇧1/2/3 派发
     current_effect: std::sync::Arc<std::sync::Mutex<String>>,
+    /// 唤出主窗口的全局快捷键（解析后的 Shortcut 对象，供 handler 精确匹配）
+    summon_shortcut: std::sync::Arc<std::sync::Mutex<Option<Shortcut>>>,
 }
 
 impl AppState {
@@ -129,6 +143,7 @@ impl AppState {
             dirty: std::sync::Arc::new(std::sync::Mutex::new(false)),
             warned_ids: std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())),
             current_effect: std::sync::Arc::new(std::sync::Mutex::new("danmaku".to_string())),
+            summon_shortcut: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -450,27 +465,206 @@ fn tag_list() -> Vec<&'static str> {
 
 #[tauri::command]
 fn load_prefs(app: tauri::AppHandle) -> Result<Preferences, String> {
+    read_prefs(&app)
+}
+
+#[tauri::command]
+fn save_prefs(app: tauri::AppHandle, prefs: Preferences) -> Result<(), String> {
+    write_prefs(&app, &prefs)
+}
+
+/// 读取偏好设置（持久化前 prefs.json 可能不存在，返回默认值）
+fn read_prefs(app: &tauri::AppHandle) -> Result<Preferences, String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let prefs_path = app_dir.join("prefs.json");
     if prefs_path.exists() {
         let content = std::fs::read_to_string(&prefs_path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&content).map_err(|e| e.to_string())
+        let mut prefs: Preferences = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+        // 配置文件存在但快捷键未设置（旧配置 / 缺字段）时补上平台默认，保证开箱即用；
+        // 已显式清空存为 "" 的情况保持不变（视为禁用）。
+        if prefs.summon_shortcut.is_none() {
+            prefs.summon_shortcut = Some(default_summon_shortcut());
+        }
+        Ok(prefs)
     } else {
         Ok(Preferences {
             default_screen: 0,
             theme: "system".to_string(),
             default_effect: "danmaku".to_string(),
+            // 首次启动（无配置文件）写入平台默认快捷键，之后以用户保存为准
+            summon_shortcut: Some(default_summon_shortcut()),
         })
     }
 }
 
-#[tauri::command]
-fn save_prefs(app: tauri::AppHandle, prefs: Preferences) -> Result<(), String> {
+/// 写入偏好设置到 prefs.json
+fn write_prefs(app: &tauri::AppHandle, prefs: &Preferences) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
     let prefs_path = app_dir.join("prefs.json");
     let content = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
     std::fs::write(&prefs_path, content).map_err(|e| e.to_string())
+}
+
+/// 返回当前运行平台：macos / windows / linux（前端据此显示正确的修饰键符号）
+#[tauri::command]
+fn get_platform() -> String {
+    std::env::consts::OS.to_string()
+}
+
+/// 设置/清除"唤出主窗口"的全局快捷键。shortcut=None 或空字符串表示清除（禁用）。
+/// 注册失败（如与现有快捷键冲突）会返回错误，由前端提示。
+#[tauri::command]
+fn set_summon_shortcut(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    shortcut: Option<String>,
+) -> Result<(), String> {
+    // 空字符串 / None 视为清除（禁用）；非空才是有效快捷键
+    let effective: Option<String> = match shortcut {
+        Some(s) if !s.trim().is_empty() => Some(s),
+        _ => None,
+    };
+    // 1. 反注册旧快捷键
+    {
+        let old = state.summon_shortcut.lock().unwrap().take();
+        if let Some(ref sc) = old {
+            let _ = app.global_shortcut().unregister(sc.clone());
+        }
+    }
+    // 2. 注册新快捷键并解析为 Shortcut 对象（供 handler 精确匹配）
+    let parsed: Option<Shortcut> = match &effective {
+        Some(s) => {
+            let sc = s.parse::<Shortcut>().map_err(|e| format!("无效快捷键: {e}"))?;
+            app.global_shortcut()
+                .register(sc.clone())
+                .map_err(|e| format!("注册失败（可能与其他快捷键冲突）: {e}"))?;
+            Some(sc)
+        }
+        None => None,
+    };
+    *state.summon_shortcut.lock().unwrap() = parsed;
+    // 3. 持久化到 prefs.json：清除时存 "" 作为禁用标记（与默认/已设置区分，避免重启后重新补默认）
+    let mut prefs = read_prefs(&app)?;
+    prefs.summon_shortcut = Some(effective.unwrap_or_default());
+    write_prefs(&app, &prefs)?;
+    Ok(())
+}
+
+/// 将主窗口重新定位到鼠标光标处：先找到光标所在的屏幕，再把窗口居中于光标并夹在该屏幕内。
+/// macOS / Windows 各自用系统 API 取全局光标位置，再按所在屏幕的缩放比换算成 Tauri 逻辑坐标。
+#[cfg(target_os = "macos")]
+fn reposition_window_to_cursor(win: &tauri::WebviewWindow) {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+        fn CGEventGetLocation(event: *mut std::ffi::c_void) -> CGPoint;
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    // CGEventCreate(NULL) 返回带当前全局光标位置的事件；坐标已是
+    // 主屏左上角原点、y 向下、逻辑(点)像素，无需翻转。
+    let event = unsafe { CGEventCreate(std::ptr::null_mut()) };
+    if event.is_null() {
+        return;
+    }
+    let pt = unsafe { CGEventGetLocation(event) };
+    unsafe {
+        CFRelease(event);
+    }
+    let scale = win.scale_factor().unwrap_or(1.0);
+    if let Ok(monitors) = win.available_monitors() {
+        for m in &monitors {
+            let ms = m.scale_factor();
+            let pos = m.position();
+            let size = m.size();
+            // 把光标逻辑点换算成该屏幕的设备像素做命中测试
+            let dx = pt.x * ms;
+            let dy = pt.y * ms;
+            if dx >= pos.x as f64
+                && dx <= pos.x as f64 + size.width as f64
+                && dy >= pos.y as f64
+                && dy <= pos.y as f64 + size.height as f64
+            {
+                let ox = pos.x as f64 / ms;
+                let oy = pos.y as f64 / ms;
+                let mw = size.width as f64 / ms;
+                let mh = size.height as f64 / ms;
+                place_window_centered_on_cursor(win, pt.x, pt.y, ox, oy, mw, mh, scale);
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn reposition_window_to_cursor(win: &tauri::WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use windows::Win32::Foundation::POINT;
+    let mut pt = POINT { x: 0, y: 0 };
+    let ok = unsafe { GetCursorPos(&mut pt).is_ok() };
+    if !ok {
+        return;
+    }
+    // GetCursorPos 返回虚拟屏幕设备像素：主屏左上角原点、y 向下，可跨多屏（含负坐标）。
+    let scale = win.scale_factor().unwrap_or(1.0);
+    if let Ok(monitors) = win.available_monitors() {
+        for m in &monitors {
+            let ms = m.scale_factor();
+            let pos = m.position();
+            let size = m.size();
+            let dx = pt.x as f64;
+            let dy = pt.y as f64;
+            if dx >= pos.x as f64
+                && dx <= pos.x as f64 + size.width as f64
+                && dy >= pos.y as f64
+                && dy <= pos.y as f64 + size.height as f64
+            {
+                let ox = pos.x as f64 / ms;
+                let oy = pos.y as f64 / ms;
+                let mw = size.width as f64 / ms;
+                let mh = size.height as f64 / ms;
+                // 光标在该屏幕的逻辑坐标
+                let cx = dx / ms;
+                let cy = dy / ms;
+                place_window_centered_on_cursor(win, cx, cy, ox, oy, mw, mh, scale);
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn reposition_window_to_cursor(_win: &tauri::WebviewWindow) {}
+
+/// 以全局逻辑坐标 (cx, cy) 为光标位置，把窗口居中其上，并夹在所在屏幕
+/// [ox,oy]~(ox+mw, oy+mh) 的逻辑矩形内（ox/oy 为该屏左上角的全局逻辑坐标）。
+fn place_window_centered_on_cursor(
+    win: &tauri::WebviewWindow,
+    cx: f64,
+    cy: f64,
+    ox: f64,
+    oy: f64,
+    mw: f64,
+    mh: f64,
+    scale: f64,
+) {
+    let outer = match win.outer_size() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let w = outer.width as f64 / scale;
+    let h = outer.height as f64 / scale;
+    let mut x = cx - w / 2.0;
+    let mut y = cy - h / 2.0;
+    x = x.max(ox).min((ox + mw - w).max(ox));
+    y = y.max(oy).min((oy + mh - h).max(oy));
+    let _ = win.set_position(tauri::LogicalPosition::new(x, y));
 }
 
 #[tauri::command]
@@ -1187,6 +1381,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, event| {
             if event.state == ShortcutState::Pressed {
+                // 唤出主窗口的快捷键优先匹配（精确匹配 Shortcut 对象）
+                let state = app.state::<AppState>();
+                let summon = state.summon_shortcut.lock().unwrap().clone();
+                if let Some(ref sc) = summon {
+                    if shortcut == sc {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                            // 通知前端聚焦输入框
+                            let _ = app.emit("vfx-summon", ());
+                            // 将窗口重新定位到鼠标所在位置（居中于光标，并夹在屏幕内）
+                            reposition_window_to_cursor(&win);
+                        }
+                        return;
+                    }
+                }
                 match shortcut.id {
                     0 => {
                         let _ = send_danmaku(app.clone(), "🔥".to_string(), "#ff6b6b".to_string(), 120.0, Some(0));
@@ -1240,9 +1451,23 @@ pub fn run() {
             }
 
             start_scheduler(app.handle().clone(), state.clone());
-            start_persist_thread(app.handle().clone(), state);
+            start_persist_thread(app.handle().clone(), state.clone());
             if let Err(e) = register_global_shortcuts(app.handle()) {
                 log::warn!("register global shortcuts failed: {e}");
+            }
+            // 唤出主窗口的快捷键最后注册（id 排在固定快捷键之后，避免挤占 0..=9 的匹配分支）
+            if let Ok(prefs) = read_prefs(app.handle()) {
+                if let Some(ref s) = prefs.summon_shortcut {
+                    // 空字符串表示已清除（禁用），不注册
+                    if !s.is_empty() {
+                        if let Ok(sc) = s.parse::<Shortcut>() {
+                            *state.summon_shortcut.lock().unwrap() = Some(sc.clone());
+                            if let Err(e) = app.handle().global_shortcut().register(sc) {
+                                log::warn!("register summon shortcut failed: {e}");
+                            }
+                        }
+                    }
+                }
             }
             if let Err(e) = setup_tray(app.handle()) {
                 log::warn!("setup tray failed: {e}");
@@ -1268,6 +1493,8 @@ pub fn run() {
             todo_reorder,
             load_prefs,
             save_prefs,
+            get_platform,
+            set_summon_shortcut,
             export_todos,
             import_todos,
             tag_list,
@@ -1650,14 +1877,14 @@ mod tests {
     // ---------- 偏好设置 ----------
     #[test]
     fn preferences_default_values() {
-        let prefs = Preferences { default_screen: 0, theme: "system".into(), default_effect: "danmaku".into() };
+        let prefs = Preferences { default_screen: 0, theme: "system".into(), default_effect: "danmaku".into(), summon_shortcut: None };
         assert_eq!(prefs.default_screen, 0);
         assert_eq!(prefs.theme, "system");
     }
 
     #[test]
     fn preferences_serialization_roundtrip() {
-        let prefs = Preferences { default_screen: 1, theme: "dark".into(), default_effect: "danmaku".into() };
+        let prefs = Preferences { default_screen: 1, theme: "dark".into(), default_effect: "danmaku".into(), summon_shortcut: None };
         let json = serde_json::to_string(&prefs).unwrap();
         let parsed: Preferences = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.default_screen, 1);
@@ -1670,6 +1897,7 @@ mod tests {
         let parsed: Preferences = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.default_screen, 0);
         assert_eq!(parsed.theme, "system");
+        assert_eq!(parsed.summon_shortcut, None);
     }
 
     // ---------- Danmaku payload ----------
