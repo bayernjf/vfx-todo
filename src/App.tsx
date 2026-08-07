@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, useState } from "react";
+import { Component, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -96,6 +96,7 @@ interface Preferences {
   default_screen: number;
   theme?: string;
   default_effect?: string;
+  summon_shortcut?: string | null;
 }
 
 const EFFECT_LABEL: Record<EffectType, string> = {
@@ -224,6 +225,43 @@ function formatLocalDT(ts: number): string {
   const d = new Date(ts);
   const off = d.getTimezoneOffset() * 60000;
   return new Date(d.getTime() - off).toISOString().slice(0, 16);
+}
+
+// 将键盘事件的 e.key 转换为 Tauri 全局快捷键的按键名；
+// 返回 null 表示忽略（仅修饰键、标点等无法作为快捷键主键的按键）
+function keyToShortcutToken(key: string): string | null {
+  if (key === " ") return "Space";
+  if (key.length === 1) {
+    if (/[a-z]/i.test(key)) return key.toUpperCase();
+    if (/[0-9]/.test(key)) return key;
+    return null;
+  }
+  const named: Record<string, string> = {
+    Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Escape: "Escape",
+    ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+    Delete: "Delete", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+    Insert: "Insert",
+  };
+  if (named[key]) return named[key];
+  if (/^F\d{1,2}$/.test(key)) return key; // F1..F12
+  return null;
+}
+
+// 将快捷键字符串格式化为适合展示的形式：Mac 用符号（⌘⇧K），Windows/Linux 用文字（Ctrl+Shift+K）
+function formatShortcutDisplay(s: string, mac: boolean): string {
+  return s
+    .split("+")
+    .map((tok) => {
+      switch (tok) {
+        case "Cmd": return "⌘";
+        case "CmdOrCtrl": return mac ? "⌘" : "Ctrl";
+        case "Ctrl": case "Control": return "Ctrl";
+        case "Alt": case "Option": return mac ? "⌥" : "Alt";
+        case "Shift": return "⇧";
+        default: return tok;
+      }
+    })
+    .join(mac ? "" : "+");
 }
 
 // ══════════════════════════════════════════
@@ -487,10 +525,28 @@ function EditForm({
 // TodoItem
 // ══════════════════════════════════════════
 
-// 图标悬浮提示（浮窗跟随鼠标，定位在光标左上角）
+// 图标悬浮提示（浮窗跟随鼠标，定位在光标左上角，带窗口边界检测，置于最顶层不被遮挡）
 
 function IconTip({ tip, children }: { tip: string; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
+
+  // 测量浮窗尺寸后，将右下角定位在光标左上 12px 处，并钳制在可视窗口内
+  useLayoutEffect(() => {
+    if (!pos || !tipRef.current) return;
+    const el = tipRef.current;
+    const rect = el.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    const pad = 6;
+    let left = pos.x - 12 - w;
+    let top = pos.y - 12 - h;
+    left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - h - pad));
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, [pos, tip]);
+
   return (
     <span
       className="icon-tip-host"
@@ -499,12 +555,9 @@ function IconTip({ tip, children }: { tip: string; children: React.ReactNode }) 
       onMouseLeave={() => setPos(null)}
     >
       {children}
-      {pos &&
+      {pos && tip &&
         createPortal(
-          <span
-            className="icon-tip"
-            style={{ right: window.innerWidth - pos.x + 12, top: pos.y - 12 }}
-          >
+          <span ref={tipRef} className="icon-tip">
             {tip}
           </span>,
           document.body
@@ -727,6 +780,7 @@ function App() {
   const customDateRef = useRef<HTMLInputElement>(null);
   const customTimeRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hotkeyWrapRef = useRef<HTMLDivElement>(null);
   // Tracks IME composition (Chinese pinyin) state so Enter used to confirm a
   // candidate is not mistaken for a submit. Some IMEs report isComposing=false
   // on that keydown, so we track it explicitly via composition events.
@@ -849,6 +903,14 @@ function App() {
   type Theme = "system" | "dark" | "light";
   const [theme, setTheme] = useState<Theme>("system");
 
+  // 快捷键设置：唤出主窗口（分 Mac / Windows，自动识别平台）
+  const [platform, setPlatform] = useState<string>("macos");
+  const isMac = platform === "macos";
+  const [summonShortcut, setSummonShortcut] = useState<string | null>(null);
+  const [hotkeyPanelOpen, setHotkeyPanelOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [pendingShortcut, setPendingShortcut] = useState<string | null>(null);
+
   useEffect(() => {
     invoke<Preferences>("load_prefs")
       .then((p) => {
@@ -860,8 +922,23 @@ function App() {
         if (p.default_effect) {
           setEffect(p.default_effect as EffectType | "random");
         }
+        setSummonShortcut(p.summon_shortcut && p.summon_shortcut.length > 0 ? p.summon_shortcut : null);
       })
       .catch(() => {}); // 首次启动无文件，正常
+    // 自动识别运行平台（macos / windows / linux），用于显示正确的修饰键符号
+    invoke<string>("get_platform")
+      .then(setPlatform)
+      .catch(() => setPlatform("macos"));
+  }, []);
+
+  // 唤出主窗口时聚焦待办输入框（窗口定位与聚焦由后端完成）
+  useEffect(() => {
+    const unlisten = listen("vfx-summon", () => {
+      inputRef.current?.focus();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   // 同步主题到 <html> data-theme 属性
@@ -1146,6 +1223,70 @@ function App() {
     invoke("save_prefs", { prefs: p }).catch(console.error);
   };
 
+  // 快捷键设置：保存/清除"唤出主窗口"全局快捷键
+  const saveSummonShortcut = async () => {
+    if (!pendingShortcut) return;
+    try {
+      await invoke("set_summon_shortcut", { shortcut: pendingShortcut });
+      setSummonShortcut(pendingShortcut);
+      setPendingShortcut(null);
+      setHotkeyPanelOpen(false);
+    } catch (e) {
+      alert(`快捷键设置失败：${(e as Error).message}`);
+    }
+  };
+
+  const clearSummonShortcut = async () => {
+    try {
+      await invoke("set_summon_shortcut", { shortcut: null });
+      setSummonShortcut(null);
+      setPendingShortcut(null);
+    } catch (e) {
+      alert(`快捷键清除失败：${(e as Error).message}`);
+    }
+  };
+
+  // 录制快捷键：捕获下一次按键组合（capture 阶段，阻止默认行为如浏览器快捷键）
+  useEffect(() => {
+    if (!recording) return;
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      const key = e.key;
+      if (["Shift", "Control", "Alt", "Meta"].includes(key)) return; // 纯修饰键，等待主键
+      const token = keyToShortcutToken(key);
+      if (!token) return;
+      const parts: string[] = [];
+      if (isMac) {
+        if (e.metaKey) parts.push("Cmd");
+        if (e.ctrlKey) parts.push("Ctrl");
+      } else {
+        if (e.ctrlKey) parts.push("Ctrl");
+      }
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      // 必须有主修饰键：Mac=Cmd，Windows/Linux=Ctrl
+      const hasPrimary = isMac ? e.metaKey : e.ctrlKey;
+      if (!hasPrimary) return;
+      parts.push(token);
+      setPendingShortcut(parts.join("+"));
+      setRecording(false);
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [recording, isMac]);
+
+  // 点击弹层外部时关闭（录制中不打断）
+  useEffect(() => {
+    if (!hotkeyPanelOpen || recording) return;
+    const onDown = (e: MouseEvent) => {
+      if (hotkeyWrapRef.current && !hotkeyWrapRef.current.contains(e.target as Node)) {
+        setHotkeyPanelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [hotkeyPanelOpen, recording]);
+
   // 客户端过滤：标签 + 搜索文字 + 已完成
   const filteredTodos = todos
     .filter((t) => {
@@ -1181,19 +1322,94 @@ function App() {
           <span className="counter">{activeCount} 待办 · {completedCount} 已完成</span>
         </div>
         <div className="header-actions">
-          <button
-            className="icon-btn theme-toggle"
-            onClick={() => {
-              const next = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
-              setTheme(next);
-              savePrefs({ ...prefs, theme: next });
-            }}
-            title={`主题：${theme === "dark" ? "当前深色" : theme === "light" ? "当前亮色" : "当前跟随系统"} · 点击切换`}
+          <IconTip tip={hotkeyPanelOpen ? "" : "快捷键设置：全局唤出 VFX Todo"}>
+            <div className="hotkey-wrap" ref={hotkeyWrapRef}>
+              <button
+                className={`icon-btn ${hotkeyPanelOpen ? "active" : ""}`}
+                onClick={() => setHotkeyPanelOpen(!hotkeyPanelOpen)}
+              >
+                ⌨
+              </button>
+              {hotkeyPanelOpen && (
+                <div className="hotkey-popover" role="dialog" aria-label="快捷键设置">
+                  <div className="hotkey-title">唤出 VFX Todo</div>
+                  <div className="hotkey-desc">设置全局快捷键，随时唤出主窗口</div>
+                  <div className="hotkey-current">
+                    <span className="hotkey-label">当前：</span>
+                    <span className="hotkey-value">
+                      {summonShortcut ? formatShortcutDisplay(summonShortcut, isMac) : "未设置"}
+                    </span>
+                  </div>
+                  {!recording && !pendingShortcut && (
+                    <div className="hotkey-actions">
+                      <button
+                        className="hotkey-btn"
+                        onClick={() => {
+                          setPendingShortcut(null);
+                          setRecording(true);
+                        }}
+                      >
+                        录制新快捷键
+                      </button>
+                      {summonShortcut && (
+                        <button className="hotkey-btn danger" onClick={clearSummonShortcut}>
+                          清除
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {recording && (
+                    <div className="hotkey-recording">
+                      <span>请按下快捷键组合…</span>
+                      <span className="hotkey-hint">（需包含 {isMac ? "⌘" : "Ctrl"}）</span>
+                      <button className="hotkey-btn" onClick={() => setRecording(false)}>
+                        取消
+                      </button>
+                    </div>
+                  )}
+                  {pendingShortcut && (
+                    <div className="hotkey-pending">
+                      <span className="hotkey-value">{formatShortcutDisplay(pendingShortcut, isMac)}</span>
+                      <div className="hotkey-actions">
+                        <button className="hotkey-btn save" onClick={saveSummonShortcut}>
+                          保存
+                        </button>
+                        <button
+                          className="hotkey-btn"
+                          onClick={() => {
+                            setPendingShortcut(null);
+                            setRecording(true);
+                          }}
+                        >
+                          重录
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </IconTip>
+          <IconTip
+            tip={`主题：${theme === "dark" ? "当前深色" : theme === "light" ? "当前亮色" : "当前跟随系统"} · 点击切换`}
           >
-            {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
-          </button>
-          <button className="icon-btn" onClick={() => handleExport("json")} title="导出 JSON">↓</button>
-          <button className="icon-btn" onClick={() => handleImport("json")} title="导入 JSON">↑</button>
+            <button
+              className="icon-btn theme-toggle"
+              onClick={() => {
+                const next = theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+                setTheme(next);
+                savePrefs({ ...prefs, theme: next });
+              }}
+            >
+              {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
+            </button>
+          </IconTip>
+          <IconTip tip="导出 JSON">
+            <button className="icon-btn" onClick={() => handleExport("json")}>↓</button>
+          </IconTip>
+          <IconTip tip="导入 JSON">
+            <button className="icon-btn" onClick={() => handleImport("json")}>↑</button>
+          </IconTip>
         </div>
       </header>
 

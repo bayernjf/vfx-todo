@@ -336,8 +336,7 @@ body:not(.overlay-mode) {
 }
 .icon-tip {
   position: fixed;
-  transform: translateY(-100%);
-  z-index: 1000;
+  z-index: 9999;
   padding: 4px 8px;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -986,6 +985,115 @@ body:not(.overlay-mode) {
   background: rgba(96, 84, 241, 0.2);
   border-color: rgba(96, 84, 241, 0.5);
   color: var(--text-dim-90);
+}
+
+.icon-btn.active {
+  background: linear-gradient(135deg, rgba(96, 84, 241, 0.95), rgba(96, 84, 241, 0.7));
+  border-color: transparent;
+  color: #fff;
+}
+
+/* 快捷键设置弹层（位于主题切换按钮左侧，向下展开） */
+.hotkey-wrap {
+  position: relative;
+}
+.hotkey-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  width: 240px;
+  padding: 12px;
+  background: var(--bg);
+  opacity: 0.98;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hotkey-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.hotkey-desc {
+  font-size: 11px;
+  color: var(--text-dim-50);
+  line-height: 1.4;
+}
+.hotkey-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.hotkey-label {
+  color: var(--text-dim-65);
+}
+.hotkey-value {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: rgba(96, 84, 241, 0.12);
+  color: var(--accent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.hotkey-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hotkey-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--glass-18);
+  border-radius: 6px;
+  background: var(--glass-08);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.hotkey-btn:hover {
+  background: var(--glass-15);
+  border-color: var(--accent);
+}
+.hotkey-btn.save {
+  background: linear-gradient(135deg, rgba(96, 84, 241, 0.95), rgba(96, 84, 241, 0.7));
+  border-color: transparent;
+  color: #fff;
+}
+.hotkey-btn.danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+.hotkey-recording {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim-80);
+  padding: 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: rgba(96, 84, 241, 0.08);
+}
+.hotkey-hint {
+  color: var(--text-dim-50);
+  font-size: 11px;
+}
+.hotkey-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
 }
 
 .console-hint {
