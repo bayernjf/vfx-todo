@@ -1045,9 +1045,13 @@ function App() {
     setDanmakuSpeed(120);
   };
 
-  // 已完成待办：按原配置重复添加（等同于新建一个同样的待办，按默认到期延迟重新触发特效）
+  // 已完成待办：按原配置重复添加（保留原待办的到期偏移量，而非当前输入框的 dueInSecs）
   const duplicateTodo = async (todo: Todo) => {
-    const dueAt = Date.now() + (dueInSecs ?? DEFAULT_DUE_SECS) * 1000;
+    let dueAt: number | null = null;
+    if (todo.due_at && todo.created_at) {
+      const offset = todo.due_at - todo.created_at;
+      dueAt = Date.now() + offset;
+    }
     const created = await invoke<Todo>("todo_create", {
       title: todo.title,
       dueAt,
