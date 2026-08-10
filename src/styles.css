@@ -47,6 +47,7 @@ html {
   --on-accent: #1a1d24;       /* 彩色背景上的反色文字（深主题用深字） */
 }
 [data-theme="light"] {
+  color-scheme: light;
   --bg-primary: #f0f2f5;
   --bg-card: rgba(0,0,0,0.03);
   --bg-card-hover: rgba(0,0,0,0.06);
@@ -80,6 +81,7 @@ html {
 }
 @media (prefers-color-scheme: light) {
   html:not([data-theme="dark"]) {
+    color-scheme: light;
     --bg-primary: #f0f2f5;
     --bg-card: rgba(0,0,0,0.03);
     --bg-card-hover: rgba(0,0,0,0.06);

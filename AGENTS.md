@@ -15,7 +15,7 @@ This file provides guidance to AI agents working on this repository.
 src/
   App.tsx         # Main window: all UI logic, TodoItem component, helpers, shaders
   Overlay.tsx     # Overlay window: WebGL + Canvas 2D VFX rendering (7 effect types)
-  styles.css      # All styles (overlay, batch bar, theme vars, drag states)
+  styles.css      # All styles (overlay, batch bar, theme vars, drag states, modals)
   main.tsx        # React entry point
   __tests__/      # Vitest tests (5 files, 38 tests)
   __mocks__/      # Tauri API mocks for testing
@@ -27,6 +27,9 @@ e2e/
 src-tauri/src/
   lib.rs          # All Rust logic: Todo struct, AppState, commands, scheduler, persist thread
   main.rs         # Tauri app entry point
+src-tauri/capabilities/
+  default.json    # Permission grants (updater, http, dialog, etc.)
+announcements.example.json  # Announcement JSON template for GitHub Gist
 ```
 
 ## Key Conventions
@@ -59,8 +62,10 @@ cargo test            # Rust tests (run from src-tauri/)
 - **VFX effects:** 8 types (danmaku, particle, shatter, rain, firework, ripple, laser, glitch) routed by todo level
 - **Multi-screen:** Effects target specific displays via `overlay-{screen_id}` window labels
 - **Performance:** WebGL shader caching, in-memory Rust cache with 5s background persist, TodoItem component isolation
-- **Theme:** Dark/Light/System via CSS variables
+- **Theme:** Dark/Light/System via CSS variables; `color-scheme` set per theme for native controls (select, date, time)
 - **Persistence:** JSON file in app data directory, in-memory cache with background flush
+- **Update system:** `tauri-plugin-updater` with GitHub Releases, minisign pubkey verification, silent check on startup + manual button
+- **Announcement system:** Remote JSON (GitHub Gist) fetched via `tauri-plugin-http` on startup, new-announcement detection via localStorage, history list in header popover
 
 ## UI Layout: Floating Panel Design
 
