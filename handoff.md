@@ -10,7 +10,7 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 
 ## Current Branch
 
-`feature/20260729` - Multi-screen support + performance optimization + full feature set branch
+`dev` - Active development branch (feature/20260729 merged, ongoing work)
 
 ## Commits (chronological)
 
@@ -46,6 +46,14 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 | 9b56d90 | test | add E2E test suites with Tauri API mock |
 | bf43384 | chore | exclude e2e/ from vitest run |
 | 9831583 | docs | update handoff with E2E tests and latest features |
+| 0c7d01a | feat | add summon-shortcut settings UI and unified tooltips |
+| 9e15da4 | feat | add summon shortcut preference and reposition window to cursor |
+| 36f5198 | test | add summon-shortcut mocks and fix theme-toggle selector |
+| b1489b8 | fix | preserve original due offset on duplicate todo |
+| f50500f | feat | add updater and http plugin configuration |
+| 880a514 | feat | add update check and announcement UI |
+| bd2cba6 | chore | ignore .webview2-data local cache |
+| b272764 | fix | add color-scheme for native controls theme support |
 
 ## Implemented Features
 
@@ -92,24 +100,27 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 - Custom datetime picker for due time
 
 ### 7. UX Enhancements
-- Dark / Light / System theme with CSS variables
+- Dark / Light / System theme with CSS variables; `color-scheme` per theme for native controls
 - Undo toast for complete/delete/batch operations (auto-dismiss 4s)
 - Drag-and-drop manual reorder with backend persistence
+- **Summon shortcut:** Configurable global hotkey (Ctrl+Shift+K etc.) to bring the main window to front; macro-triggered via `notify_global_shortcut` for Cursor/IDE integration
+- **Announcement system:** Remote JSON (GitHub Gist) fetched on startup; new-announcement popup with localStorage read tracking; history list in header popover
+- **Application update:** `tauri-plugin-updater` with GitHub Releases + minisign pubkey; silent check on startup + manual ⟳ button; download progress bar; updates install on next launch
 
 ### 8. Testing
 - **Rust integration tests (lib.rs):** CRUD, batch ops, level routing (color/speed/effect), VFX validation, tag validation, Preferences/DanmakuPayload/VfxPayload/ScreenInfo serialization, deterministic effect dispatch, idempotency, edge cases
 - **Frontend unit/integration tests (vitest):** TodoItem component, helpers, shaders, App integration, Overlay integration (Canvas 2D danmaku + all 7 WebGL effects)
 - **E2E tests (Playwright):** Full Tauri API mock, Todo CRUD, search/sort/filter, undo, batch operations, theme cycles, drag-and-drop reorder, multi-screen routing
-- All tests passing (**112 total:** 36 Rust + 38 frontend + 38 E2E)
+- All tests passing (**112 total:** 36 Rust + 38 frontend + 38 E2E) — note: E2E tests may need mock updates for new features (summon shortcut, update, announcement)
 
 ## Key Files
 
 ### Frontend
 | File | Purpose |
 |------|---------|
-| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector, theme toggle, undo toast; includes TodoItem component, helper functions, shader sources |
+| `src/App.tsx` | Main UI: todo CRUD, search, sort, filter, batch ops, multi-screen selector, theme toggle, undo toast, summon shortcut UI, update check, announcement system; includes TodoItem, component, helper functions, shader sources |
 | `src/Overlay.tsx` | Overlay window: WebGL + Canvas 2D effect rendering, 7 VFX types |
-| `src/styles.css` | All styles including overlay mode, batch bar, theme CSS vars, drag states |
+| `src/styles.css` | All styles including overlay mode, batch bar, theme CSS vars, drag states, floating panels, modals, tooltips |
 | `src/main.tsx` | React entry point |
 | `src/__tests__/` | Vitest test files (5 files, 38 tests total) |
 
@@ -132,12 +143,13 @@ A VFX-focused todo application that triggers visual effects (danmaku, particles,
 ### Config
 | File | Purpose |
 |------|---------|
-| `src-tauri/capabilities/default.json` | Window + system permissions |
-| `src-tauri/tauri.conf.json` | Tauri app configuration |
-| `Cargo.toml` | Rust dependencies (serde, chrono, uuid, rand, etc.) |
+| `src-tauri/capabilities/default.json` | Window + system permissions (updater, http, dialog grants) |
+| `src-tauri/tauri.conf.json` | Tauri app configuration (incl. updater public key + endpoint) |
+| `src-tauri/Cargo.toml` | Rust dependencies (serde, chrono, uuid, rand, tauri-plugin-updater, tauri-plugin-http, etc.) |
 | `package.json` | Frontend dependencies, E2E scripts |
 | `vite.config.ts` | Vite + vitest configuration (excludes e2e/) |
 | `tsconfig.json` | TypeScript config |
+| `announcements.example.json` | Announcement JSON template for GitHub Gist |
 
 ## Commands
 
@@ -157,7 +169,7 @@ cargo test            # Run Rust tests
 
 1. ~~Run E2E tests on CI pipeline~~ **DONE** — `.github/workflows/ci.yml` runs `cargo test` + `npm test` + `npm run test:e2e` on every push/PR
 2. ~~Verify multi-screen on real multi-monitor hardware~~ **DONE** — real-hardware self-test (`VFX_TODO_SELFTEST=1 npm run tauri dev`) verified 3-display routing isolation on 2026-08-01
-3. **Create PR** to merge `feature/20260729` into integration branch (dev/main - TBD)
+3. **Create PR** to merge `dev` into `main`
 
 ## Notes
 
@@ -166,3 +178,7 @@ cargo test            # Run Rust tests
 - Rust + frontend + E2E test suites are all passing; run before push
 - E2E tests use a full Tauri API mock in `page.addInitScript` — no Tauri runtime needed
 - Playwright `webServer` points at the Vite dev port **1420** (Tauri's fixed port); `reuseExistingServer: false` avoids colliding with other local dev servers
+- **Tauri debug build loads from `dist/` locally** (no devUrl/beforeDevCommand); run `npm run build` after frontend changes
+- **TRAE sandbox on Windows** blocks `app.exe` from writing to `AppData\Local\com.vfxtodo.app`; run the compiled binary directly from `src-tauri\target\debug\app.exe` to bypass
+- **`.webview2-data/`** is a local cache generated on app startup; listed in `.gitignore`
+- **Announcement URL** is hardcoded in `src/App.tsx` as `ANNOUNCEMENT_URL` pointing to GitHub Gist; update before deploying to a different Gist
