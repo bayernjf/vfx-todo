@@ -2,6 +2,8 @@ import { Component, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
+import { fetch } from "@tauri-apps/plugin-http";
 
 // ══════════════════════════════════════════
 // 错误边界
@@ -99,6 +101,18 @@ interface Preferences {
   summon_shortcut?: string | null;
 }
 
+// 公告数据结构（远程 GitHub Gist JSON）
+interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  date: string;
+  url?: string;
+}
+
+// 更新检查状态
+type UpdateStatus = "idle" | "checking" | "available" | "no-update" | "error";
+
 const EFFECT_LABEL: Record<EffectType, string> = {
   danmaku: "弹幕",
   shatter: "破碎",
@@ -154,6 +168,10 @@ const DUE_PRESETS: { label: string; secs: number }[] = [
 
 // 新建待办默认到期延迟（秒）。BLOCKER: 上线前改回 300
 const DEFAULT_DUE_SECS = 3;
+
+// 公告远程 JSON 地址（GitHub Gist raw URL）
+const ANNOUNCEMENT_URL =
+  "https://gist.githubusercontent.com/bayernjf/vfx-todo/main/announcements.json";
 
 // ══════════════════════════════════════════
 // 工具函数
@@ -824,6 +842,21 @@ function App() {
   const undoRef = useRef(undoAction);
   undoRef.current = undoAction;
 
+  // 应用更新
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  const [updateVersion, setUpdateVersion] = useState<string>("");
+  const [updateNote, setUpdateNote] = useState<string>("");
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number>(0);
+  const updateContentLengthRef = useRef(0);
+  const updateDownloadedRef = useRef(0);
+
+  // 公告
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [showAnnouncementList, setShowAnnouncementList] = useState(false);
+  const [currentAnnouncement, setCurrentAnnouncement] = useState<Announcement | null>(null);
+  const [hasNewAnnouncement, setHasNewAnnouncement] = useState(false);
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -929,6 +962,12 @@ function App() {
     invoke<string>("get_platform")
       .then(setPlatform)
       .catch(() => setPlatform("macos"));
+  }, []);
+
+  // 启动时静默检查更新 + 拉取公告
+  useEffect(() => {
+    doCheckUpdate(true);
+    fetchAnnouncements();
   }, []);
 
   // 唤出主窗口时聚焦待办输入框（窗口定位与聚焦由后端完成）
@@ -1227,6 +1266,107 @@ function App() {
     invoke("save_prefs", { prefs: p }).catch(console.error);
   };
 
+  // ── 应用更新检查 ──
+  const doCheckUpdate = async (silent: boolean) => {
+    setUpdateStatus("checking");
+    try {
+      const update = await check();
+      if (update) {
+        setUpdateStatus("available");
+        setUpdateVersion(update.version);
+        setUpdateNote(update.body || "");
+        if (!silent) {
+          setShowAnnouncementList(false);
+        }
+      } else {
+        setUpdateStatus("no-update");
+        if (!silent) {
+          alert("当前已是最新版本");
+        }
+      }
+    } catch (e) {
+      setUpdateStatus("error");
+      if (!silent) {
+        alert(`检查更新失败：${(e as Error).message}`);
+      }
+    }
+  };
+
+  // 下载并安装更新
+  const downloadAndInstall = async () => {
+    setUpdateDownloading(true);
+    setUpdateProgress(0);
+    updateContentLengthRef.current = 0;
+    updateDownloadedRef.current = 0;
+    try {
+      const update = await check();
+      if (!update) {
+        alert("没有可用的更新");
+        return;
+      }
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          updateContentLengthRef.current = event.data.contentLength ?? 0;
+          setUpdateProgress(0);
+        } else if (event.event === "Progress") {
+          updateDownloadedRef.current += event.data.chunkLength;
+          const total = updateContentLengthRef.current;
+          if (total > 0) {
+            setUpdateProgress(
+              Math.min(100, Math.round((updateDownloadedRef.current / total) * 100))
+            );
+          }
+        } else if (event.event === "Finished") {
+          setUpdateProgress(100);
+        }
+      });
+      // 安装完成，下次启动应用时生效
+      setUpdateStatus("idle");
+      alert("更新已下载完成，将在下次启动应用时生效");
+    } catch (e) {
+      alert(`更新失败：${(e as Error).message}`);
+    } finally {
+      setUpdateDownloading(false);
+    }
+  };
+
+  // ── 公告获取 ──
+  const fetchAnnouncements = async () => {
+    try {
+      const resp = await fetch(ANNOUNCEMENT_URL);
+      if (!resp.ok) return;
+      const data = await resp.json() as Announcement[];
+      if (!Array.isArray(data) || data.length === 0) return;
+      setAnnouncements(data);
+
+      // 检查是否有新公告（与 localStorage 中已读 ID 对比）
+      const lastReadId = localStorage.getItem("vfx-todo-last-read-announcement");
+      const latest = data[0];
+      if (latest && latest.id !== lastReadId) {
+        setHasNewAnnouncement(true);
+        setCurrentAnnouncement(latest);
+        setShowAnnouncementModal(true);
+      }
+    } catch (e) {
+      // 静默失败，不影响正常使用
+      console.error("Failed to fetch announcements:", e);
+    }
+  };
+
+  // 标记当前公告为已读
+  const markAnnouncementRead = (ann: Announcement) => {
+    localStorage.setItem("vfx-todo-last-read-announcement", ann.id);
+    setHasNewAnnouncement(false);
+  };
+
+  // 点击公告铃铛
+  const openAnnouncementList = () => {
+    setShowAnnouncementList(!showAnnouncementList);
+    if (announcements.length > 0) {
+      markAnnouncementRead(announcements[0]);
+    }
+  };
+
   // 快捷键设置：保存/清除"唤出主窗口"全局快捷键
   const saveSummonShortcut = async () => {
     if (!pendingShortcut) return;
@@ -1413,6 +1553,49 @@ function App() {
           </IconTip>
           <IconTip tip="导入 JSON">
             <button className="icon-btn" onClick={() => handleImport("json")}>↑</button>
+          </IconTip>
+          {/* 公告 */}
+          <div className="hotkey-wrap">
+            <IconTip tip="公告">
+              <button
+                className={`icon-btn ${hasNewAnnouncement ? "has-badge" : ""} ${showAnnouncementList ? "active" : ""}`}
+                onClick={openAnnouncementList}
+              >
+                {hasNewAnnouncement ? "🔔" : "≁"}
+              </button>
+            </IconTip>
+            {showAnnouncementList && (
+              <div className="hotkey-popover announcement-list" role="dialog" aria-label="公告列表">
+                <div className="hotkey-title">公告</div>
+                {announcements.length === 0 ? (
+                  <div className="hotkey-desc">暂无公告</div>
+                ) : (
+                  announcements.map((ann) => (
+                    <div
+                      key={ann.id}
+                      className="announcement-item"
+                      onClick={() => {
+                        setCurrentAnnouncement(ann);
+                        setShowAnnouncementModal(true);
+                        setShowAnnouncementList(false);
+                      }}
+                    >
+                      <div className="announcement-item-title">{ann.title}</div>
+                      <div className="announcement-item-date">{ann.date}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          {/* 检查更新 */}
+          <IconTip tip={updateStatus === "available" ? `有新版本 v${updateVersion}` : "检查更新"}>
+            <button
+              className={`icon-btn ${updateStatus === "available" ? "has-badge" : ""}`}
+              onClick={() => doCheckUpdate(false)}
+            >
+              {updateStatus === "checking" ? "◌" : updateStatus === "available" ? "↑" : "⟳"}
+            </button>
           </IconTip>
         </div>
       </header>
@@ -1842,6 +2025,65 @@ function App() {
           <span>{undoAction.label}</span>
           <button className="undo-toast-btn" onClick={undoLast}>撤销</button>
           <button className="undo-toast-close" onClick={() => setUndoAction(null)}>✕</button>
+        </div>
+      )}
+
+      {/* 更新可用弹窗 */}
+      {updateStatus === "available" && (
+        <div className="modal-overlay" onClick={() => setUpdateStatus("idle")}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">发现新版本 v{updateVersion}</div>
+            {updateNote && (
+              <pre className="modal-body">{updateNote}</pre>
+            )}
+            {updateDownloading ? (
+              <div className="update-progress">
+                <div className="update-progress-bar" style={{ width: `${updateProgress}%` }} />
+                <span>{updateProgress}%</span>
+              </div>
+            ) : (
+              <div className="modal-actions">
+                <button className="hotkey-btn save" onClick={downloadAndInstall}>
+                  立即更新
+                </button>
+                <button className="hotkey-btn" onClick={() => setUpdateStatus("idle")}>
+                  稍后
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 公告弹窗 */}
+      {showAnnouncementModal && currentAnnouncement && (
+        <div className="modal-overlay" onClick={() => setShowAnnouncementModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">{currentAnnouncement.title}</div>
+            <div className="announcement-meta">{currentAnnouncement.date}</div>
+            <pre className="modal-body">{currentAnnouncement.body}</pre>
+            <div className="modal-actions">
+              {currentAnnouncement.url && (
+                <a
+                  href={currentAnnouncement.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hotkey-btn"
+                >
+                  查看详情
+                </a>
+              )}
+              <button
+                className="hotkey-btn save"
+                onClick={() => {
+                  markAnnouncementRead(currentAnnouncement);
+                  setShowAnnouncementModal(false);
+                }}
+              >
+                知道了
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
