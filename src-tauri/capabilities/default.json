@@ -13,7 +13,6 @@
     "global-shortcut:allow-is-registered",
     "dialog:allow-open",
     "dialog:allow-save",
-    "updater:default",
-    "http:default"
+    "updater:default"
   ]
 }
