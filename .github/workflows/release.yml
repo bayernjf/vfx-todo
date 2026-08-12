@@ -193,7 +193,10 @@ jobs:
           fi
 
   build:
-    name: build (${{ matrix.platform }})
+    # Show the target in the job name so the three parallel jobs are
+    # distinguishable in the GitHub Actions UI (otherwise all three
+    # read as "build (macos-latest)" / "build (windows-latest)").
+    name: build (${{ matrix.target }})
     needs: [resolve-version, cleanup-snapshot]
     if: always() && needs.resolve-version.result == 'success' && (needs.cleanup-snapshot.result == 'success' || needs.cleanup-snapshot.result == 'skipped')
     strategy:
