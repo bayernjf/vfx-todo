@@ -6,7 +6,7 @@ use tauri::{Emitter, Listener, Manager, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
-
+mod update;
 
 // ============ 数据模型 ============
 
@@ -1500,6 +1500,7 @@ pub fn run() {
             export_todos,
             import_todos,
             tag_list,
+            update::fetch_announcements,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

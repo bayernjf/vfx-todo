@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
-import { fetch } from "@tauri-apps/plugin-http";
 
 // ══════════════════════════════════════════
 // 错误边界
@@ -168,10 +167,6 @@ const DUE_PRESETS: { label: string; secs: number }[] = [
 
 // 新建待办默认到期延迟（秒）。BLOCKER: 上线前改回 300
 const DEFAULT_DUE_SECS = 3;
-
-// 公告远程 JSON 地址（GitHub Gist raw URL）
-const ANNOUNCEMENT_URL =
-  "https://gist.githubusercontent.com/bayernjf/vfx-todo/main/announcements.json";
 
 // ══════════════════════════════════════════
 // 工具函数
@@ -1333,9 +1328,9 @@ function App() {
   // ── 公告获取 ──
   const fetchAnnouncements = async () => {
     try {
-      const resp = await fetch(ANNOUNCEMENT_URL);
-      if (!resp.ok) return;
-      const data = await resp.json() as Announcement[];
+      // 走 Rust 侧命令：debug 模式读本地 announcements.json，release 走 GitHub raw。
+      // 失败一律返回空数组（公告是"增强"而不是"必需"，静默失败比弹错更友好）。
+      const data = await invoke<Announcement[]>("fetch_announcements");
       if (!Array.isArray(data) || data.length === 0) return;
       setAnnouncements(data);
 
