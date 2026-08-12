@@ -33,6 +33,17 @@ jobs:
             libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev
 
+      # tauri::generate_context!() 宏在编译期硬要求 frontendDist 路径存在，
+      # 不先构建前端，cargo test 会因为 dist/ 不存在而失败。
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build frontend (for tauri context)
+        run: npm ci && npm run build
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
