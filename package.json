@@ -1,7 +1,7 @@
 {
   "name": "vfx-todo",
   "private": true,
-  "version": "0.0.0-dev.43a9264",
+  "version": "0.0.0-dev.6119289",
   "type": "module",
   "scripts": {
     "dev": "vite",
