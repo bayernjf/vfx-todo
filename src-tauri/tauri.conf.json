@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "vfx-todo",
-  "version": "0.0.0-dev.6119289",
+  "version": "0.0.0-dev.505345b",
   "identifier": "com.vfxtodo.app",
   "build": {
     "frontendDist": "../dist"
