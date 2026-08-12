@@ -237,6 +237,12 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Build frontend (vite)
+        # tauri-action shells out to `tauri build`, which reads
+        # `tauri.conf.json`'s `frontendDist` (../dist) at compile time.
+        # We must populate dist/ here or Tauri will refuse to start.
+        run: npm run build
+
       - name: Type-check
         run: npm run check
 
