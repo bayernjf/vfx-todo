@@ -4,10 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.vfxtodo.app",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "frontendDist": "../dist"
   },
   "app": {
     "macOSPrivateApi": true,
@@ -42,6 +39,14 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MDMyQzk4Q0UyMjlENQpSV1RWS2VLTXlUS0FBYUZ2VTVSMWRFTktCbCtaOGNRQ0FqOHd5U2ZWTnk2YWpPMjVqaU0wb3ZwaQo=",
+      "endpoints": [
+        "https://github.com/bayernjf/vfx-todo/releases/latest/download/latest.json"
+      ]
     }
   }
 }

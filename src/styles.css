@@ -47,6 +47,7 @@ html {
   --on-accent: #1a1d24;       /* 彩色背景上的反色文字（深主题用深字） */
 }
 [data-theme="light"] {
+  color-scheme: light;
   --bg-primary: #f0f2f5;
   --bg-card: rgba(0,0,0,0.03);
   --bg-card-hover: rgba(0,0,0,0.06);
@@ -80,6 +81,7 @@ html {
 }
 @media (prefers-color-scheme: light) {
   html:not([data-theme="dark"]) {
+    color-scheme: light;
     --bg-primary: #f0f2f5;
     --bg-card: rgba(0,0,0,0.03);
     --bg-card-hover: rgba(0,0,0,0.06);
@@ -336,8 +338,7 @@ body:not(.overlay-mode) {
 }
 .icon-tip {
   position: fixed;
-  transform: translateY(-100%);
-  z-index: 1000;
+  z-index: 9999;
   padding: 4px 8px;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -988,6 +989,115 @@ body:not(.overlay-mode) {
   color: var(--text-dim-90);
 }
 
+.icon-btn.active {
+  background: linear-gradient(135deg, rgba(96, 84, 241, 0.95), rgba(96, 84, 241, 0.7));
+  border-color: transparent;
+  color: #fff;
+}
+
+/* 快捷键设置弹层（位于主题切换按钮左侧，向下展开） */
+.hotkey-wrap {
+  position: relative;
+}
+.hotkey-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  width: 240px;
+  padding: 12px;
+  background: var(--bg);
+  opacity: 0.98;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hotkey-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.hotkey-desc {
+  font-size: 11px;
+  color: var(--text-dim-50);
+  line-height: 1.4;
+}
+.hotkey-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.hotkey-label {
+  color: var(--text-dim-65);
+}
+.hotkey-value {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: rgba(96, 84, 241, 0.12);
+  color: var(--accent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.hotkey-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hotkey-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--glass-18);
+  border-radius: 6px;
+  background: var(--glass-08);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.hotkey-btn:hover {
+  background: var(--glass-15);
+  border-color: var(--accent);
+}
+.hotkey-btn.save {
+  background: linear-gradient(135deg, rgba(96, 84, 241, 0.95), rgba(96, 84, 241, 0.7));
+  border-color: transparent;
+  color: #fff;
+}
+.hotkey-btn.danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.4);
+}
+.hotkey-recording {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim-80);
+  padding: 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: rgba(96, 84, 241, 0.08);
+}
+.hotkey-hint {
+  color: var(--text-dim-50);
+  font-size: 11px;
+}
+.hotkey-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
 .console-hint {
   font-size: 11px;
   color: var(--text-dim-35);
@@ -1303,4 +1413,143 @@ body.overlay-mode {
   0% { opacity: 1; }
   60% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* ============ 图标按钮角标（公告/更新提示） ============ */
+.icon-btn.has-badge {
+  position: relative;
+}
+.icon-btn.has-badge::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  background: #ff4d4f;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--bg-primary);
+}
+
+/* ============ 模态弹窗（更新 / 公告） ============ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.modal-card {
+  width: 100%;
+  max-width: 440px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--glass-20);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.modal-body {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--glass-06);
+  border: 1px solid var(--glass-12);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-dim-85);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.modal-actions a.hotkey-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* 更新下载进度条 */
+.update-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-progress-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #6054f1, #8a7dff);
+  transition: width 0.2s ease;
+}
+.update-progress > span {
+  font-size: 12px;
+  color: var(--text-dim-70);
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+}
+
+/* 公告弹窗元数据（日期） */
+.announcement-meta {
+  font-size: 11px;
+  color: var(--text-dim-50);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 公告列表（基于 hotkey-popover 扩展） */
+.hotkey-popover.announcement-list {
+  width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.announcement-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--glass-06);
+  border: 1px solid var(--glass-10);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.announcement-item:hover {
+  background: var(--glass-12);
+  border-color: var(--accent);
+}
+.announcement-item-title {
+  font-size: 13px;
+  color: var(--text-dim-90);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.announcement-item-date {
+  font-size: 11px;
+  color: var(--text-dim-45);
+  font-variant-numeric: tabular-nums;
 }

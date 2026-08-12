@@ -17,6 +17,7 @@ export interface MockPreferences {
   default_screen: number;
   notify: boolean;
   notify_minutes: number;
+  summon_shortcut: string | null;
 }
 
 export interface MockScreen {
@@ -34,6 +35,7 @@ const DEFAULT_PREFS = {
   default_screen: 0,
   notify: true,
   notify_minutes: 1,
+  summon_shortcut: null,
 };
 
 function makeTodo(t: any, i = 0): any {
@@ -156,6 +158,14 @@ export function getTauriMockScript(screens: MockScreen[] = DEFAULT_SCREENS): str
         load_prefs: async () => ({ ...window.__STORE__.prefs }),
         save_prefs: async (args) => {
           window.__STORE__.prefs = { ...window.__STORE__.prefs, ...(args || {}) };
+          return true;
+        },
+        get_platform: async () => "macos",
+        set_summon_shortcut: async (args) => {
+          window.__STORE__.prefs = {
+            ...window.__STORE__.prefs,
+            summon_shortcut: (args && args.shortcut) ?? null,
+          };
           return true;
         },
         list_screens: async () => __screens,

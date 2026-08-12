@@ -31,3 +31,6 @@ coverage/
 .tauri-dev.pid
 .vite-preview.log
 .vite-preview.pid
+
+# Tauri WebView2 local cache (Windows)
+.webview2-data/

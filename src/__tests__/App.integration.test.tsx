@@ -472,11 +472,11 @@ describe("主题切换", () => {
       load_prefs: { default_screen: 0, theme: "dark" },
     });
     await waitFor(() => {
-      const themeBtn = document.querySelector(".icon-btn");
+      const themeBtn = document.querySelector(".theme-toggle");
       expect(themeBtn).toBeTruthy();
     });
     // Click theme toggle button
-    const themeBtn = document.querySelector(".icon-btn");
+    const themeBtn = document.querySelector(".theme-toggle");
     await userEvent.click(themeBtn!);
     // Theme should change to light (uses data-theme attribute on html)
     await waitFor(() => {
