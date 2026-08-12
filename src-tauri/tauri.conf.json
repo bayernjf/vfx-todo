@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "vfx-todo",
-  "version": "0.1.0",
+  "version": "0.0.0-5",
   "identifier": "com.vfxtodo.app",
   "build": {
     "frontendDist": "../dist"
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,10 +44,13 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MDMyQzk4Q0UyMjlENQpSV1RWS2VLTXlUS0FBYUZ2VTVSMWRFTktCbCtaOGNRQ0FqOHd5U2ZWTnk2YWpPMjVqaU0wb3ZwaQo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQkY5Q0MyMTJCRDIyNQpSV1FsMGlzaHpQbkxCVXJBazVFcTFNZnNOTFNNQlphcjhWeHF2OFJCVWd1L3FuR0VvSDk2b0JQOAo=",
       "endpoints": [
         "https://github.com/bayernjf/vfx-todo/releases/latest/download/latest.json"
-      ]
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

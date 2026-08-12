@@ -1,0 +1,270 @@
+name: Release
+
+# Three trigger modes (mirrors soft-desk release.yml):
+#   1. push v* tag   → formal release  (draft, manual publish)
+#   2. push main     → formal release  (auto +0.0.1, draft, manual publish)
+#   3. push dev      → Dev Snapshot    (prerelease, tag=snapshot, overwritten)
+#
+# Formal releases use prerelease=false and stay as drafts so a human can
+# review the GitHub Release before publishing; dev snapshot publishes
+# automatically and overwrites the previous `snapshot` release on every push.
+#
+# Versioning:
+#   - formal  → semver from `vX.Y.Z` tag, or `git tag -l 'v*.*.*' +0.0.1` on main
+#   - snapshot → `0.0.0-<run_number>` (semver prerelease, pure-numeric ID
+#     because the Windows MSI bundler rejects alphabetic prerelease
+#     segments; run_number is repo-global, monotonic per push, always <65535)
+# Both `package.json` and `src-tauri/tauri.conf.json` are bumped in lockstep
+# so the binary embeds the correct version string.
+#
+# Required GitHub Secrets:
+#   TAURI_SIGNING_PRIVATE_KEY          — PEM/key from `tauri signer generate`
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — password set during `tauri signer generate`
+# The matching public key lives in `src-tauri/tauri.conf.json` under
+# `plugins.updater.pubkey` and is safe to commit.
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+      - dev
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - "src-tauri/**"
+      - "vite.config.ts"
+      - "tsconfig*.json"
+      - "announcements.json"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  # dev / main: only the latest push keeps running; tag: serialize to avoid
+  # two formal releases racing on the same SHA.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      is_tag: ${{ steps.resolve.outputs.is_tag }}
+      is_main: ${{ steps.resolve.outputs.is_main }}
+      is_dev: ${{ steps.resolve.outputs.is_dev }}
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      release_name: ${{ steps.resolve.outputs.release_name }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+      generate_notes: ${{ steps.resolve.outputs.generate_notes }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
+      release_draft: ${{ steps.resolve.outputs.release_draft }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve release tag and mode
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          IS_TAG=false
+          IS_MAIN=false
+          IS_DEV=false
+          TAG_NAME=""
+          RELEASE_NAME=""
+          IS_PRERELEASE=true
+          GENERATE_NOTES=false
+          RELEASE_DRAFT=true
+          COMMIT_SHA="${{ github.sha }}"
+
+          sync_tauri_version() {
+            local v="$1"
+            node -e "
+              const fs = require('fs');
+              const p = 'src-tauri/tauri.conf.json';
+              const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+              c.version = '$v';
+              fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+            "
+          }
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            IS_TAG=true
+            TAG_NAME="${{ github.ref_name }}"
+            RELEASE_NAME="vfx-todo ${{ github.ref_name }}"
+            IS_PRERELEASE=false
+            GENERATE_NOTES=true
+            RELEASE_DRAFT=true
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            IS_MAIN=true
+            LATEST_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n 1 || true)
+            if [[ -z "$LATEST_TAG" ]]; then
+              LATEST_TAG="v0.0.0"
+            fi
+            VERSION=${LATEST_TAG#v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            TAG_NAME="v${NEW_VERSION}"
+            RELEASE_NAME="vfx-todo ${TAG_NAME}"
+            IS_PRERELEASE=false
+            GENERATE_NOTES=true
+            RELEASE_DRAFT=true
+
+            npm version "$NEW_VERSION" --no-git-tag-version
+            sync_tauri_version "$NEW_VERSION"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json src-tauri/tauri.conf.json
+            git commit -m "chore(release): bump version to ${NEW_VERSION} [skip ci]"
+            git push origin HEAD:main
+            COMMIT_SHA=$(git rev-parse HEAD)
+          elif [[ "${{ github.ref }}" == refs/heads/dev ]]; then
+            IS_DEV=true
+            # Windows MSI bundler rejects pre-release identifiers that contain
+            # non-numeric chars (e.g. a hex short-SHA). Use the repo-global
+            # github.run_number instead — pure decimal, monotonic per push.
+            NEW_VERSION="0.0.0-${{ github.run_number }}"
+            TAG_NAME="snapshot"
+            RELEASE_NAME="vfx-todo Dev Snapshot"
+            IS_PRERELEASE=true
+            GENERATE_NOTES=false
+            RELEASE_DRAFT=false
+
+            # --allow-same-version lets a re-run on the same push still go
+            # through `npm version` without failing.
+            npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+            sync_tauri_version "$NEW_VERSION"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json src-tauri/tauri.conf.json
+            # `|| true` because a re-run on the same SHA may have nothing to commit.
+            git commit -m "chore(snapshot): bump version to ${NEW_VERSION} [skip ci]" || true
+            git push origin HEAD:dev
+            COMMIT_SHA=$(git rev-parse HEAD)
+          fi
+
+          {
+            echo "is_tag=$IS_TAG"
+            echo "is_main=$IS_MAIN"
+            echo "is_dev=$IS_DEV"
+            echo "tag_name=$TAG_NAME"
+            echo "release_name=$RELEASE_NAME"
+            echo "is_prerelease=$IS_PRERELEASE"
+            echo "generate_notes=$GENERATE_NOTES"
+            echo "commit_sha=$COMMIT_SHA"
+            echo "release_draft=$RELEASE_DRAFT"
+          } >> "$GITHUB_OUTPUT"
+
+  cleanup-snapshot:
+    name: Delete existing snapshot release
+    # Only the dev branch hits the snapshot lane; remove the previous release
+    # + tag so tauri-action can recreate them cleanly.
+    if: needs.resolve-version.outputs.is_dev == 'true'
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete existing snapshot release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if gh release view snapshot >/dev/null 2>&1; then
+            echo "Deleting existing snapshot release"
+            gh release delete snapshot --yes --cleanup-tag
+          else
+            echo "No existing snapshot release"
+          fi
+
+  build:
+    # Show the target in the job name so the three parallel jobs are
+    # distinguishable in the GitHub Actions UI (otherwise all three
+    # read as "build (macos-latest)" / "build (windows-latest)").
+    name: build (${{ matrix.target }})
+    needs: [resolve-version, cleanup-snapshot]
+    if: always() && needs.resolve-version.result == 'success' && (needs.cleanup-snapshot.result == 'success' || needs.cleanup-snapshot.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-version.outputs.commit_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build frontend (vite)
+        # tauri-action shells out to `tauri build`, which reads
+        # `tauri.conf.json`'s `frontendDist` (../dist) at compile time.
+        # We must populate dist/ here or Tauri will refuse to start.
+        run: npm run build
+
+      - name: Type-check
+        run: npm run check
+
+      - name: Build & sign + upload release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.resolve-version.outputs.tag_name }}
+          releaseName: ${{ needs.resolve-version.outputs.release_name }}
+          releaseDraft: ${{ needs.resolve-version.outputs.release_draft == 'true' }}
+          prerelease: ${{ needs.resolve-version.outputs.is_prerelease == 'true' }}
+          # includeUpdaterJson forces tauri-action to emit latest.json next
+          # to the bundles so tauri-plugin-updater can find them.
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}

@@ -6,7 +6,7 @@ use tauri::{Emitter, Listener, Manager, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
-
+mod update;
 
 // ============ 数据模型 ============
 
@@ -1380,7 +1380,6 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, event| {
             if event.state == ShortcutState::Pressed {
                 // 唤出主窗口的快捷键优先匹配（精确匹配 Shortcut 对象）
@@ -1500,6 +1499,7 @@ pub fn run() {
             export_todos,
             import_todos,
             tag_list,
+            update::fetch_announcements,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

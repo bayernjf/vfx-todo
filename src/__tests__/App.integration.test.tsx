@@ -76,6 +76,7 @@ function base() {
     trigger_todo: () => {},
     send_danmaku: () => {},
     trigger_vfx: () => {},
+    fetch_announcements: [],
   };
 }
 
