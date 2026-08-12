@@ -843,6 +843,7 @@ function App() {
   const [updateNote, setUpdateNote] = useState<string>("");
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<number>(0);
+  const updateRef = useRef<any>(null);
   const updateContentLengthRef = useRef(0);
   const updateDownloadedRef = useRef(0);
 
@@ -1266,6 +1267,7 @@ function App() {
     setUpdateStatus("checking");
     try {
       const update = await check();
+      updateRef.current = update;
       if (update) {
         setUpdateStatus("available");
         setUpdateVersion(update.version);
@@ -1294,12 +1296,12 @@ function App() {
     updateContentLengthRef.current = 0;
     updateDownloadedRef.current = 0;
     try {
-      const update = await check();
+      const update = updateRef.current;
       if (!update) {
         alert("没有可用的更新");
         return;
       }
-      await update.downloadAndInstall((event) => {
+      await update.downloadAndInstall((event: any) => {
         if (event.event === "Started") {
           updateContentLengthRef.current = event.data.contentLength ?? 0;
           setUpdateProgress(0);
