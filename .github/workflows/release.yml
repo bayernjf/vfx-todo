@@ -11,7 +11,9 @@ name: Release
 #
 # Versioning:
 #   - formal  → semver from `vX.Y.Z` tag, or `git tag -l 'v*.*.*' +0.0.1` on main
-#   - snapshot → `0.0.0-dev.<short_sha>` (semver prerelease, acceptable to tauri.conf.json)
+#   - snapshot → `0.0.0-<run_number>` (semver prerelease, pure-numeric ID
+#     because the Windows MSI bundler rejects alphabetic prerelease
+#     segments; run_number is repo-global, monotonic per push, always <65535)
 # Both `package.json` and `src-tauri/tauri.conf.json` are bumped in lockstep
 # so the binary embeds the correct version string.
 #
@@ -135,16 +137,18 @@ jobs:
             COMMIT_SHA=$(git rev-parse HEAD)
           elif [[ "${{ github.ref }}" == refs/heads/dev ]]; then
             IS_DEV=true
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            NEW_VERSION="0.0.0-dev.${SHORT_SHA}"
+            # Windows MSI bundler rejects pre-release identifiers that contain
+            # non-numeric chars (e.g. a hex short-SHA). Use the repo-global
+            # github.run_number instead — pure decimal, monotonic per push.
+            NEW_VERSION="0.0.0-${{ github.run_number }}"
             TAG_NAME="snapshot"
             RELEASE_NAME="vfx-todo Dev Snapshot"
             IS_PRERELEASE=true
             GENERATE_NOTES=false
             RELEASE_DRAFT=false
 
-            # --allow-same-version lets the same dev commit get a fresh version
-            # string on retry without failing npm version.
+            # --allow-same-version lets a re-run on the same push still go
+            # through `npm version` without failing.
             npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
             sync_tauri_version "$NEW_VERSION"
 
