@@ -139,7 +139,7 @@ describe("创建", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
-  it("创建待办带到期时间", async () => {
+  it("默认创建待办不带到期时间", async () => {
     let capturedArgs: Record<string, unknown> = {};
     renderApp({
       todo_create: (args: Record<string, unknown>) => {
@@ -148,6 +148,24 @@ describe("创建", () => {
       },
     });
     const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    await userEvent.type(input, "无到期{Enter}");
+    await waitFor(() => expect(screen.getByText("无到期")).toBeTruthy());
+    // 未显式选择预设/自定义时间时，不得产生到期时间（否则调度器会立刻判完成）
+    expect(capturedArgs.dueAt).toBeNull();
+  });
+
+  it("选择预设后创建待办带到期时间", async () => {
+    let capturedArgs: Record<string, unknown> = {};
+    renderApp({
+      todo_create: (args: Record<string, unknown>) => {
+        capturedArgs = args || {};
+        return mTodo({ title: args?.title, due_at: args?.dueAt });
+      },
+    });
+    const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    fireEvent.focus(input);
+    await waitFor(() => expect(screen.getByText("+5m")).toBeTruthy());
+    await userEvent.click(screen.getByText("+5m"));
     await userEvent.type(input, "到期{Enter}");
     await waitFor(() => expect(screen.getByText("到期")).toBeTruthy());
     expect(capturedArgs.dueAt).toBeGreaterThan(Date.now() + 2000);
@@ -157,15 +175,26 @@ describe("创建", () => {
 describe("到期时间", () => {
   it("显示到期预设按钮", async () => {
     renderApp();
+    const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    fireEvent.focus(input);
     await waitFor(() => expect(screen.getByText("+3s")).toBeTruthy());
     expect(screen.getByText("+1m")).toBeTruthy();
     expect(screen.getByText("+5m")).toBeTruthy();
     expect(screen.getByText("+30m")).toBeTruthy();
   });
 
-  it("到期提示显示默认 3 秒", async () => {
+  it("默认无到期提示，选择预设后显示到期提示", async () => {
     renderApp();
-    await waitFor(() => expect(screen.getByText(/3秒后触发/)).toBeTruthy());
+    const input = screen.getByPlaceholderText("输入待办内容，回车添加");
+    fireEvent.focus(input);
+    await waitFor(() => expect(screen.getByText("到期提醒：")).toBeTruthy());
+    // 默认不选中任何预设 → 无"X秒后触发"提示
+    expect(document.querySelector(".due-hint")).toBeNull();
+
+    await userEvent.click(screen.getByText("+1m"));
+    await waitFor(() =>
+      expect(screen.getByText(/已选 1分钟后触发/)).toBeTruthy()
+    );
   });
 });
 

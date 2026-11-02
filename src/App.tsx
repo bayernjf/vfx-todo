@@ -165,8 +165,8 @@ const DUE_PRESETS: { label: string; secs: number }[] = [
   { label: "+30m", secs: 1800 },
 ];
 
-// 新建待办默认到期延迟（秒）。BLOCKER: 上线前改回 300
-const DEFAULT_DUE_SECS = 3;
+// 新建待办默认无到期时间：只有用户显式选择预设或自定义时间才设置 due_at，
+// 否则调度器会在到期后立刻把待办标记为已完成。
 
 // ══════════════════════════════════════════
 // 工具函数
@@ -786,7 +786,7 @@ function TodoItem({
 function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
-  const [dueInSecs, setDueInSecs] = useState<number | null>(DEFAULT_DUE_SECS);
+  const [dueInSecs, setDueInSecs] = useState<number | null>(null);
   const [customDue, setCustomDue] = useState("");
   const [customDate, setCustomDate] = useState(defaultDueDateString());
   const [customTime, setCustomTime] = useState(defaultDueTimeString());
@@ -1067,7 +1067,7 @@ function App() {
     });
     setTodos((prev) => [...prev, todo]);
     setInput("");
-    setDueInSecs(DEFAULT_DUE_SECS);
+    setDueInSecs(null);
     setCustomDue("");
     setCustomDate(defaultDueDateString());
     setCustomTime(defaultDueTimeString());
