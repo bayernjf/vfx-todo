@@ -23,12 +23,16 @@ pub struct Announcement {
 
 /// 从仓库根目录 `announcements.json` 拉取公告列表。
 ///
+/// 必须是 `async fn`：Tauri v2 的非 async command 在主线程执行，而这里内嵌了
+/// 最长 10s 超时的 HTTP 请求，前端启动即调（App.tsx），网络不佳时 UI 冻结最长
+/// 约 10 秒（review P1-6）。async command 由 Tauri 自动丢入运行时线程池。
+///
 /// 行为：
 /// 1. dev / debug 构建：优先读本地 `announcements.json`（项目根），便于开发时改完即生效。
 /// 2. 否则：HTTP 拉取 `ANNOUNCEMENTS_URL`。失败一律返回空 Vec（公告是"增强"而不是"必需"，
 ///    静默失败比弹错更友好）。
 #[tauri::command]
-pub fn fetch_announcements() -> Vec<Announcement> {
+pub async fn fetch_announcements() -> Vec<Announcement> {
     // Debug 模式：CARGO_MANIFEST_DIR = src-tauri/，项目根是其 parent。
     #[cfg(debug_assertions)]
     {
@@ -46,7 +50,7 @@ pub fn fetch_announcements() -> Vec<Announcement> {
         }
     }
 
-    let client = match reqwest::blocking::Client::builder()
+    let client = match reqwest::Client::builder()
         .user_agent("vfx-todo-announcements")
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -58,7 +62,7 @@ pub fn fetch_announcements() -> Vec<Announcement> {
         }
     };
 
-    let resp = match client.get(ANNOUNCEMENTS_URL).send() {
+    let resp = match client.get(ANNOUNCEMENTS_URL).send().await {
         Ok(r) => r,
         Err(e) => {
             log::info!("announcements: fetch failed (silent): {e}");
@@ -71,7 +75,7 @@ pub fn fetch_announcements() -> Vec<Announcement> {
         return Vec::new();
     }
 
-    match resp.json::<Vec<Announcement>>() {
+    match resp.json::<Vec<Announcement>>().await {
         Ok(list) => list,
         Err(e) => {
             log::warn!("announcements: parse failed: {e}");
@@ -144,5 +148,36 @@ mod tests {
         let a: Announcement = serde_json::from_str(json).unwrap();
         assert_eq!(a.id, "x");
         assert!(a.url.is_none());
+    }
+
+    // ---------- P1-6 回归：command 必须是 async（主线程不跑 10s 阻塞 HTTP） ----------
+
+    #[test]
+    fn fetch_announcements_returns_future() {
+        // 若退回同步 fn（主线程执行、UI 冻结），本断言无法通过编译——
+        // Vec<Announcement> 不是 Future。
+        fn assert_future<F: std::future::Future<Output = Vec<Announcement>>>(_: &F) {}
+        assert_future(&fetch_announcements());
+    }
+
+    #[test]
+    fn fetch_announcements_debug_reads_local_file_first_poll() {
+        // debug 构建走项目根 announcements.json（不触网），首轮 poll 即 Ready；
+        // 若哪天 debug 路径也引入真正 Pending 的 await，这里会暴露。
+        use std::future::Future;
+        use std::sync::Arc;
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct Noop;
+        impl Wake for Noop {
+            fn wake(self: Arc<Self>) {}
+        }
+        let waker = Waker::from(Arc::new(Noop));
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = Box::pin(fetch_announcements());
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(list) => assert!(!list.is_empty()),
+            Poll::Pending => panic!("debug local path must complete on first poll"),
+        }
     }
 }
