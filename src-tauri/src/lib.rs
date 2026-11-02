@@ -1262,6 +1262,72 @@ fn hide_dock_icon(_app: &tauri::AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn hide_dock_icon(_app: &tauri::AppHandle) {}
 
+/// 标准 CSV 字段写出（RFC 4180）：含 `,` `"` `\n` `\r` 的字段用双引号包裹，
+/// 字段内的 `"` 转义为 `""`。替代旧的 `replace(",", "\\,")` 自制转义——
+/// 后者与导入侧 `split(',')` 互不兼容，含逗号/换行的标题 round-trip 全字段错位
+///（review P1-3）。
+fn csv_append_field(out: &mut String, field: &str) {
+    if field.contains([',', '"', '\n', '\r']) {
+        out.push('"');
+        for ch in field.chars() {
+            if ch == '"' {
+                out.push('"');
+            }
+            out.push(ch);
+        }
+        out.push('"');
+    } else {
+        out.push_str(field);
+    }
+}
+
+/// 引号感知的 CSV 全文解析（RFC 4180）：支持 quoted 字段内的 `,`、换行与 `""` 转义。
+/// 行内 CR/LF 均视为记录分隔；quoted 字段内的换行保留在字段值中。
+fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut field_started = false; // 当前字段是否已有内容或开引号（区分空尾行）
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    field.push('"');
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                field.push(c);
+            }
+        } else if c == '"' && !field_started {
+            in_quotes = true;
+            field_started = true;
+        } else if c == ',' {
+            row.push(std::mem::take(&mut field));
+            field_started = false;
+        } else if c == '\n' || c == '\r' {
+            if c == '\r' && chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            row.push(std::mem::take(&mut field));
+            field_started = false;
+            rows.push(std::mem::take(&mut row));
+        } else {
+            field.push(c);
+            field_started = true;
+        }
+    }
+    // 文件末尾无换行时收尾最后一行（全空尾部不产空行）
+    if field_started || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
+}
+
 #[tauri::command]
 async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, format: String) -> Result<(), String> {
     use tauri_plugin_dialog::DialogExt;
@@ -1278,18 +1344,24 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
         "csv" => {
             let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag\n");
             for t in todos {
-                csv.push_str(&format!(
-                    "{},{},{},{},{},{},{},{},{}\n",
+                let fields = [
                     t.id,
-                    t.title.replace(",", "\\,"),
-                    t.completed,
-                    t.created_at,
+                    t.title,
+                    t.completed.to_string(),
+                    t.created_at.to_string(),
                     t.due_at.map(|v| v.to_string()).unwrap_or_default(),
-                    t.screen,
+                    t.screen.to_string(),
                     t.recurrence.unwrap_or_default(),
                     t.effect.unwrap_or_default(),
-                    t.tag.unwrap_or_default()
-                ));
+                    t.tag.unwrap_or_default(),
+                ];
+                for (i, f) in fields.iter().enumerate() {
+                    if i > 0 {
+                        csv.push(',');
+                    }
+                    csv_append_field(&mut csv, f);
+                }
+                csv.push('\n');
             }
             csv
         }
@@ -1314,27 +1386,26 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
         "json" => serde_json::from_str(&data).map_err(|e| e.to_string())?,
         "csv" => {
             let mut result = Vec::new();
-            for (i, line) in data.lines().enumerate() {
+            for (i, parts) in parse_csv(&data).into_iter().enumerate() {
                 if i == 0 { continue; }
-                let parts: Vec<&str> = line.split(',').collect();
                 if parts.len() < 7 { continue; }
                 // 列顺序：id,title,completed,created_at,due_at,screen,recurrence,effect,tag
                 let effect = parts
                     .get(7)
-                    .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
                     .and_then(|e| if is_vfx_effect(&e) { Some(e) } else { None });
                 let tag = parts
                     .get(8)
-                    .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
                     .and_then(|t| if is_valid_tag(&t) { Some(t) } else { None });
                 result.push(Todo {
-                    id: parts[0].to_string(),
-                    title: parts[1].replace("\\,", ","),
+                    id: parts[0].clone(),
+                    title: parts[1].clone(),
                     completed: parts[2].parse().unwrap_or(false),
                     created_at: parts[3].parse().unwrap_or(0),
                     due_at: parts[4].parse().ok(),
                     screen: parts[5].parse().unwrap_or(0),
-                    recurrence: parts.get(6).and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+                    recurrence: parts.get(6).and_then(|s| if s.is_empty() { None } else { Some(s.clone()) }),
                     effect,
                     tag,
                     order: result.len() as i64,
@@ -1540,6 +1611,95 @@ mod tests {
 
     fn test_state() -> AppState {
         AppState::new()
+    }
+
+    // ---------- CSV 转义（P1-3 回归） ----------
+
+    /// 与 export_todos 相同的单行写出逻辑（9 列）
+    fn csv_row(fields: &[&str]) -> String {
+        let mut line = String::new();
+        for (i, f) in fields.iter().enumerate() {
+            if i > 0 {
+                line.push(',');
+            }
+            csv_append_field(&mut line, f);
+        }
+        line.push('\n');
+        line
+    }
+
+    #[test]
+    fn csv_field_plain_not_quoted() {
+        let mut s = String::new();
+        csv_append_field(&mut s, "plain title");
+        assert_eq!(s, "plain title");
+    }
+
+    #[test]
+    fn csv_field_with_comma_quoted() {
+        let mut s = String::new();
+        csv_append_field(&mut s, "开会, 讨论");
+        assert_eq!(s, "\"开会, 讨论\"");
+    }
+
+    #[test]
+    fn csv_field_with_quote_escaped() {
+        let mut s = String::new();
+        csv_append_field(&mut s, "say \"hi\"");
+        assert_eq!(s, "\"say \"\"hi\"\"\"");
+    }
+
+    #[test]
+    fn csv_field_with_newline_quoted() {
+        let mut s = String::new();
+        csv_append_field(&mut s, "line1\nline2");
+        assert_eq!(s, "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn csv_parse_quoted_comma_and_quotes() {
+        let rows = parse_csv("id1,\"开会, 讨论\",false\nid2,\"say \"\"hi\"\"\",true\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["id1", "开会, 讨论", "false"]);
+        assert_eq!(rows[1], vec!["id2", "say \"hi\"", "true"]);
+    }
+
+    #[test]
+    fn csv_parse_quoted_newline_inside_field() {
+        let rows = parse_csv("id1,\"line1\nline2\",false\nid3,plain,true\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][1], "line1\nline2");
+        assert_eq!(rows[1][0], "id3");
+    }
+
+    #[test]
+    fn csv_parse_crlf_and_missing_trailing_newline() {
+        let rows = parse_csv("a,b\r\nc,d");
+        assert_eq!(rows, vec![vec!["a", "b"], vec!["c", "d"]]);
+    }
+
+    #[test]
+    fn csv_roundtrip_special_titles() {
+        // 导出 9 列 → 跳过表头解析 → 逐字段全等（旧实现含逗号标题全字段错位）
+        let titles = ["开会, 讨论", "say \"hi\"", "line1\nline2", "plain", "尾随,"];
+        let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag\n");
+        for (i, title) in titles.iter().enumerate() {
+            csv.push_str(&csv_row(&[
+                &format!("id{i}"), title, "false", "1000000", "", "0", "", "firework", "工作",
+            ]));
+        }
+        let rows = parse_csv(&csv);
+        assert_eq!(rows.len(), titles.len() + 1);
+        for (i, title) in titles.iter().enumerate() {
+            let r = &rows[i + 1];
+            assert_eq!(r.len(), 9, "row {i} column count");
+            assert_eq!(r[0], format!("id{i}"));
+            assert_eq!(&r[1], title);
+            assert_eq!(r[2], "false");
+            assert_eq!(r[3], "1000000");
+            assert_eq!(r[7], "firework");
+            assert_eq!(r[8], "工作");
+        }
     }
 
     // Sync wrappers — 直接操作 AppState, 绕过 Tauri 命令壳, 测试同样的逻辑路径
