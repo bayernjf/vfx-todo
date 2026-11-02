@@ -296,23 +296,28 @@ interface EditState {
 }
 
 function EditForm({
-  edit,
+  initial,
   screens,
   onSave,
   onCancel,
-  onChange,
 }: {
-  edit: EditState;
+  initial: EditState;
   screens: ScreenInfo[];
-  onSave: () => void;
+  onSave: (form: EditState) => void;
   onCancel: () => void;
-  onChange: (patch: Partial<EditState>) => void;
 }) {
+  // 表单状态自持：进入编辑时初始化一次，之后的键入/勾选全部走 setState。
+  // 不能退化成"父组件每次渲染重建临时对象 + Object.assign 突变"——那会让受控
+  // 输入逐字符回显重置，且 TodoItem 的每秒 tick 会用 todo props 重建临时对象，
+  // 把未保存修改全部清空（见 docs/reviews/2026-11-02-code-review.md P1-4）。
+  const [form, setForm] = useState<EditState>(initial);
+  const update = (patch: Partial<EditState>) =>
+    setForm((f) => ({ ...f, ...patch }));
   const [customDate, setCustomDate] = useState(
-    edit.customDue ? edit.customDue.slice(0, 10) : defaultDueDateString()
+    initial.customDue ? initial.customDue.slice(0, 10) : defaultDueDateString()
   );
   const [customTime, setCustomTime] = useState(
-    edit.customDue ? edit.customDue.slice(11, 16) : defaultDueTimeString()
+    initial.customDue ? initial.customDue.slice(11, 16) : defaultDueTimeString()
   );
   const customDateRef = useRef<HTMLInputElement>(null);
   const customTimeRef = useRef<HTMLInputElement>(null);
@@ -324,17 +329,17 @@ function EditForm({
     setCustomDate(d);
     setCustomTime(t);
     const full = `${d}T${t}`;
-    onChange({ customDue: full, dueAt: new Date(full).getTime(), duePreset: null });
+    update({ customDue: full, dueAt: new Date(full).getTime(), duePreset: null });
   };
   return (
     <div className="edit-form">
       <input
         className="edit-title-input"
-        value={edit.title}
-        onChange={(e) => onChange({ title: e.target.value })}
+        value={form.title}
+        onChange={(e) => update({ title: e.target.value })}
         placeholder="待办标题"
         autoFocus
-        onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && !composingRef.current && onSave()}
+        onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && !composingRef.current && onSave(form)}
         onCompositionStart={() => {
           composingRef.current = true;
         }}
@@ -344,16 +349,16 @@ function EditForm({
       />
       <div className="edit-row">
         <select
-          value={edit.effect}
-          onChange={(e) => onChange({ effect: e.target.value as EffectType })}
+          value={form.effect}
+          onChange={(e) => update({ effect: e.target.value as EffectType })}
         >
           {(Object.keys(EFFECT_LABEL) as EffectType[]).map((k) => (
             <option key={k} value={k}>{EFFECT_LABEL[k]}</option>
           ))}
         </select>
         <select
-          value={edit.tag}
-          onChange={(e) => onChange({ tag: e.target.value as TagType | "" })}
+          value={form.tag}
+          onChange={(e) => update({ tag: e.target.value as TagType | "" })}
         >
           <option value="">无标签</option>
           {TAGS.map((t) => (
@@ -361,8 +366,8 @@ function EditForm({
           ))}
         </select>
         <select
-          value={edit.screen}
-          onChange={(e) => onChange({ screen: Number(e.target.value) })}
+          value={form.screen}
+          onChange={(e) => update({ screen: Number(e.target.value) })}
         >
           <option value={-1}>全部</option>
           {screens.map((s) => (
@@ -377,11 +382,11 @@ function EditForm({
         {DUE_PRESETS.map((p) => (
           <button
             key={p.secs}
-            className={`due-btn ${edit.duePreset === p.secs ? "active" : ""}`}
+            className={`due-btn ${form.duePreset === p.secs ? "active" : ""}`}
             onClick={() =>
-              onChange({
-                duePreset: edit.duePreset === p.secs ? null : p.secs,
-                dueAt: edit.duePreset === p.secs ? null : addSecs(p.secs),
+              update({
+                duePreset: form.duePreset === p.secs ? null : p.secs,
+                dueAt: form.duePreset === p.secs ? null : addSecs(p.secs),
                 customDue: "",
               })
             }
@@ -397,7 +402,7 @@ function EditForm({
             value={customDate}
             min={todayDateString()}
             onFocus={() => {
-              if (!edit.customDue) {
+              if (!form.customDue) {
                 const d = defaultDueDateString();
                 setCustomDate(d);
                 if (customDateRef.current) customDateRef.current.value = d;
@@ -413,7 +418,7 @@ function EditForm({
             value={customTime}
             min={customDate === todayDateString() ? timeStringNow() : undefined}
             onFocus={() => {
-              if (!edit.customDue) {
+              if (!form.customDue) {
                 const t = defaultDueTimeString();
                 setCustomTime(t);
                 if (customTimeRef.current) customTimeRef.current.value = t;
@@ -434,8 +439,8 @@ function EditForm({
         {[1, 2, 3].map((n) => (
           <button
             key={n}
-            className={`due-btn ${edit.repeatCount === n ? "active" : ""}`}
-            onClick={() => onChange({ repeatCount: n })}
+            className={`due-btn ${form.repeatCount === n ? "active" : ""}`}
+            onClick={() => update({ repeatCount: n })}
           >
             {n}
           </button>
@@ -443,16 +448,16 @@ function EditForm({
         <span className="repeat-stepper">
           <button
             className="due-btn"
-            disabled={edit.repeatCount <= 1}
-            onClick={() => onChange({ repeatCount: Math.max(1, edit.repeatCount - 1) })}
+            disabled={form.repeatCount <= 1}
+            onClick={() => update({ repeatCount: Math.max(1, form.repeatCount - 1) })}
           >
             −
           </button>
-          <span className="repeat-count">{edit.repeatCount}</span>
+          <span className="repeat-count">{form.repeatCount}</span>
           <button
             className="due-btn"
-            disabled={edit.repeatCount >= 10}
-            onClick={() => onChange({ repeatCount: Math.min(10, edit.repeatCount + 1) })}
+            disabled={form.repeatCount >= 10}
+            onClick={() => update({ repeatCount: Math.min(10, form.repeatCount + 1) })}
           >
             +
           </button>
@@ -461,8 +466,8 @@ function EditForm({
         {[1, 2, 3].map((n) => (
           <button
             key={n}
-            className={`due-btn ${edit.playDuration === n ? "active" : ""}`}
-            onClick={() => onChange({ playDuration: n })}
+            className={`due-btn ${form.playDuration === n ? "active" : ""}`}
+            onClick={() => update({ playDuration: n })}
           >
             {n}s
           </button>
@@ -470,16 +475,16 @@ function EditForm({
         <span className="repeat-stepper">
           <button
             className="due-btn"
-            disabled={edit.playDuration <= 1}
-            onClick={() => onChange({ playDuration: Math.max(1, edit.playDuration - 1) })}
+            disabled={form.playDuration <= 1}
+            onClick={() => update({ playDuration: Math.max(1, form.playDuration - 1) })}
           >
             −
           </button>
-          <span className="repeat-count">{edit.playDuration}s</span>
+          <span className="repeat-count">{form.playDuration}s</span>
           <button
             className="due-btn"
-            disabled={edit.playDuration >= 5}
-            onClick={() => onChange({ playDuration: Math.min(5, edit.playDuration + 1) })}
+            disabled={form.playDuration >= 5}
+            onClick={() => update({ playDuration: Math.min(5, form.playDuration + 1) })}
           >
             +
           </button>
@@ -488,8 +493,8 @@ function EditForm({
         {[80, 120, 180].map((n) => (
           <button
             key={n}
-            className={`due-btn ${edit.danmakuSpeed === n ? "active" : ""}`}
-            onClick={() => onChange({ danmakuSpeed: n })}
+            className={`due-btn ${form.danmakuSpeed === n ? "active" : ""}`}
+            onClick={() => update({ danmakuSpeed: n })}
           >
             {n === 80 ? "慢" : n === 120 ? "正常" : "快"}
           </button>
@@ -497,16 +502,16 @@ function EditForm({
         <span className="repeat-stepper">
           <button
             className="due-btn"
-            disabled={edit.danmakuSpeed <= 50}
-            onClick={() => onChange({ danmakuSpeed: Math.max(50, edit.danmakuSpeed - 10) })}
+            disabled={form.danmakuSpeed <= 50}
+            onClick={() => update({ danmakuSpeed: Math.max(50, form.danmakuSpeed - 10) })}
           >
             −
           </button>
-          <span className="repeat-count">{edit.danmakuSpeed}</span>
+          <span className="repeat-count">{form.danmakuSpeed}</span>
           <button
             className="due-btn"
-            disabled={edit.danmakuSpeed >= 250}
-            onClick={() => onChange({ danmakuSpeed: Math.min(250, edit.danmakuSpeed + 10) })}
+            disabled={form.danmakuSpeed >= 250}
+            onClick={() => update({ danmakuSpeed: Math.min(250, form.danmakuSpeed + 10) })}
           >
             +
           </button>
@@ -519,15 +524,15 @@ function EditForm({
         ].map((r) => (
           <button
             key={r.label}
-            className={`due-btn ${edit.recurrence === r.value ? "active" : ""}`}
-            onClick={() => onChange({ recurrence: r.value })}
+            className={`due-btn ${form.recurrence === r.value ? "active" : ""}`}
+            onClick={() => update({ recurrence: r.value })}
           >
             {r.label}
           </button>
         ))}
       </div>
       <div className="edit-actions">
-        <button className="todo-btn save" onClick={onSave}>保存</button>
+        <button className="todo-btn save" onClick={() => onSave(form)}>保存</button>
         <button className="todo-btn cancel" onClick={onCancel}>取消</button>
       </div>
     </div>
@@ -650,36 +655,34 @@ function TodoItem({
       };
     };
 
-    const edit = editFromTodo();
+    // initial 仅在 EditForm 挂载时消费一次（useState 初始化），此后每次渲染
+    // 重建的新对象不会影响表单内未保存的修改。
+    const initial = editFromTodo();
 
     return (
       <div className="todo-item editing">
         <EditForm
-          edit={edit}
+          initial={initial}
           screens={screens}
-          onSave={() => {
+          onSave={(form) => {
             // patch 键名必须是 camelCase：Tauri v2 按 camelCase 反序列化命令参数，
             // snake_case 键会被后端静默忽略。
             const patch: Record<string, unknown> = {};
-            if (edit.title !== todo.title) patch.title = edit.title;
-            if (edit.dueAt !== todo.due_at) patch.dueAt = edit.dueAt;
-            if (edit.screen !== (todo.screen ?? 0)) patch.screen = edit.screen;
-            if (edit.recurrence !== (todo.recurrence ?? null)) patch.recurrence = edit.recurrence;
-            if (edit.effect !== (todo.effect ?? "danmaku")) patch.effect = edit.effect;
-            if (edit.tag !== (todo.tag ?? "")) patch.tag = edit.tag || null;
-            if (edit.repeatCount !== (todo.repeat_count ?? 1)) patch.repeatCount = edit.repeatCount;
-            if (edit.playDuration !== (todo.play_duration ?? 2)) patch.playDuration = edit.playDuration;
-            if (edit.danmakuSpeed !== (todo.danmaku_speed ?? 120)) patch.danmakuSpeed = edit.danmakuSpeed;
+            if (form.title !== todo.title) patch.title = form.title;
+            if (form.dueAt !== todo.due_at) patch.dueAt = form.dueAt;
+            if (form.screen !== (todo.screen ?? 0)) patch.screen = form.screen;
+            if (form.recurrence !== (todo.recurrence ?? null)) patch.recurrence = form.recurrence;
+            if (form.effect !== (todo.effect ?? "danmaku")) patch.effect = form.effect;
+            if (form.tag !== (todo.tag ?? "")) patch.tag = form.tag || null;
+            if (form.repeatCount !== (todo.repeat_count ?? 1)) patch.repeatCount = form.repeatCount;
+            if (form.playDuration !== (todo.play_duration ?? 2)) patch.playDuration = form.playDuration;
+            if (form.danmakuSpeed !== (todo.danmaku_speed ?? 120)) patch.danmakuSpeed = form.danmakuSpeed;
             if (Object.keys(patch).length > 0) {
               onUpdate(todo.id, patch);
             }
             setEditing(false);
           }}
           onCancel={() => setEditing(false)}
-          onChange={(patch) => {
-            // 由 EditForm 的本地状态自己管理
-            Object.assign(edit, patch);
-          }}
         />
       </div>
     );

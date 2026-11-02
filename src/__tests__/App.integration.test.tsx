@@ -675,3 +675,79 @@ describe("已完成快捷动作", () => {
   });
 });
 
+describe("编辑表单（P1-4 回归）", () => {
+  async function openEditor(title = "Original") {
+    await waitFor(() => expect(screen.getByText(title)).toBeTruthy());
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const input = document.querySelector(
+      ".edit-title-input"
+    ) as HTMLInputElement;
+    expect(input).toBeTruthy();
+    return input;
+  }
+
+  it("键入后受控输入不回退（真实 setState，非临时对象突变）", async () => {
+    renderApp({ todo_list: [mTodo({ id: "e1", title: "Original" })] });
+    const input = await openEditor();
+    expect(input.value).toBe("Original");
+
+    // 逐字符键入：突变对象方案下 React 会在事件后把 DOM value 恢复为旧 props 值
+    fireEvent.change(input, { target: { value: "OriginalX" } });
+    expect(input.value).toBe("OriginalX");
+
+    fireEvent.change(input, { target: { value: "OriginalXY" } });
+    expect(input.value).toBe("OriginalXY");
+  });
+
+  it("带 due 的待办每秒 tick 不清空未保存修改", async () => {
+    renderApp({
+      todo_list: [
+        mTodo({ id: "e2", title: "WithDue", due_at: Date.now() + 3600_000 }),
+      ],
+    });
+    const input = await openEditor("WithDue");
+    fireEvent.change(input, { target: { value: "WithDue 改过了" } });
+    expect(input.value).toBe("WithDue 改过了");
+
+    // 等待 TodoItem 的每秒 setInterval tick 至少触发两次（真实计时器）
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(input.value).toBe("WithDue 改过了");
+  }, 10000);
+
+  it("保存把编辑结果按 camelCase patch 发给 todo_update", async () => {
+    let captured: Record<string, unknown> | null = null;
+    renderApp({
+      todo_list: [mTodo({ id: "e3", title: "Before" })],
+      todo_update: (args: Record<string, unknown>) => {
+        captured = args;
+        return mTodo({ id: String(args.id), title: String(args.title) });
+      },
+    });
+    const input = await openEditor("Before");
+    fireEvent.change(input, { target: { value: "After" } });
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(captured).not.toBeNull());
+    expect(captured).toEqual({ id: "e3", title: "After" });
+    // 保存后退出编辑态，列表展示更新后的标题
+    await waitFor(() => expect(screen.getByText("After")).toBeTruthy());
+  });
+
+  it("取消不触发 todo_update", async () => {
+    let called = false;
+    renderApp({
+      todo_list: [mTodo({ id: "e4", title: "Keep" })],
+      todo_update: () => {
+        called = true;
+        return mTodo();
+      },
+    });
+    const input = await openEditor("Keep");
+    fireEvent.change(input, { target: { value: "Discarded" } });
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(called).toBe(false);
+    await waitFor(() => expect(screen.getByText("Keep")).toBeTruthy());
+  });
+});
+
