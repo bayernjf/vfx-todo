@@ -145,6 +145,21 @@ test.describe("Undo", () => {
 
     await expect(page.locator(COMPLETED_ITEM)).toHaveCount(0);
     await expect(page.locator(TODO_ITEM)).toHaveCount(1);
+
+    // Contract regression (P1-2): undo must call todo_update with
+    // completed:false — a param the real backend must accept. The strict
+    // mock rejects params outside the real command signature, so if the
+    // backend ever drops `completed`, this test fails at the invoke call.
+    const updateArgs = await page.evaluate(
+      () => (window as any).__MOCK__.lastArgs("todo_update")
+    );
+    expect(updateArgs).not.toBeNull();
+    expect(updateArgs.completed).toBe(false);
+
+    // And the backend state must actually reflect the undo (not just DOM).
+    const todos = await page.evaluate(() => (window as any).__MOCK__.todos());
+    expect(todos).toHaveLength(1);
+    expect(todos[0].completed).toBe(false);
   });
 
   test("undo delete via toast button", async ({ page }) => {

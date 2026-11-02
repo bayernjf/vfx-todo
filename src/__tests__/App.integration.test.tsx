@@ -374,6 +374,26 @@ describe("Undo", () => {
 
     await waitFor(() => expect(screen.getByText("撤销")).toBeTruthy());
   });
+
+  it("撤销完成通过 todo_update 传 completed:false（真实后端契约）", async () => {
+    const updateSpy = vi.fn().mockImplementation((args: Record<string, unknown>) =>
+      mTodo({ id: args?.id as string, completed: false })
+    );
+    renderApp({
+      todo_list: [mTodo({ id: "uc1", title: "撤销我" })],
+      todo_update: updateSpy,
+    });
+    await waitFor(() => expect(screen.getByText("撤销我")).toBeTruthy());
+
+    await userEvent.click(screen.getByText("完成"));
+    await waitFor(() => expect(screen.getByText("撤销")).toBeTruthy());
+    await userEvent.click(screen.getByText("撤销"));
+
+    // 契约钉死：undo 依赖后端 todo_update 真实支持 completed 字段
+    await waitFor(() =>
+      expect(updateSpy).toHaveBeenCalledWith({ id: "uc1", completed: false })
+    );
+  });
 });
 
 describe("空状态", () => {
