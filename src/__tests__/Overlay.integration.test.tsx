@@ -168,6 +168,32 @@ describe("WebGL VFX", () => {
       await waitFor(() => expect(wglOps).toContain("drawArrays"), { timeout: 10000 });
     });
   });
+
+  it("play_duration 控制特效实际播放时长（P1-5 回归）", async () => {
+    render(<Overlay />);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const draws = () => wglOps.filter((o) => o === "drawArrays").length;
+
+    // play_duration=1：1.5s 后动画必须已结束（drawArrays 停止增长）。
+    // 旧实现写死 2000ms 时，1.5s 处仍在播放，本断言会失败。
+    emit("vfx", { id: 1, effect: "particle", text: "short", color: "#fff", repeat_count: 1, play_duration: 1 });
+    await waitFor(() => expect(wglOps).toContain("drawArrays"), { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 1500));
+    const shortDone = draws();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(draws()).toBe(shortDone);
+
+    // play_duration=5：同样的 1.5s 处动画必须仍在播放（drawArrays 持续增长）。
+    // 旧实现写死 2000ms 时此时已结束，本断言会失败。
+    wglOps = [];
+    emit("vfx", { id: 2, effect: "particle", text: "long", color: "#fff", repeat_count: 1, play_duration: 5 });
+    await waitFor(() => expect(wglOps).toContain("drawArrays"), { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 1500));
+    const longMid = draws();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(draws()).toBeGreaterThan(longMid);
+  }, 15000);
 });
 
 // ===================== 卸载 =====================

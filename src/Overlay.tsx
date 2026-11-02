@@ -29,6 +29,8 @@ interface VfxPayload {
   text: string;
   color: string;
   repeat_count: number;
+  // 非弹幕特效播放时长（秒，1-5），与后端 Rust VfxPayload.play_duration 对齐
+  play_duration: number;
 }
 
 // ============ WebGL 特效引擎 ============
@@ -362,7 +364,7 @@ class VfxEngine {
     this.currentUniforms = uniforms;
   }
 
-  trigger(effect: EffectType, color: string, repeatCount: number = 1, onDone?: () => void, onPlaySound?: () => void) {
+  trigger(effect: EffectType, color: string, repeatCount: number = 1, playDuration: number = 2, onDone?: () => void, onPlaySound?: () => void) {
     if (!this.gl) return;
     const fragSrc = SHADER_MAP[effect];
     if (!fragSrc) {
@@ -372,6 +374,9 @@ class VfxEngine {
     this.currentEffect = effect;
     this.currentColor = color;
     this.currentSeed = Math.random() * 100;
+    // 播放时长由 payload 决定（秒→毫秒），clamp 与后端 lib.rs 的 clamp(1, 5) 对齐；
+    // 不能再写死 2000ms，否则 UI 的 1-5s 设置端到端无效（review P1-5）
+    this.duration = Math.min(Math.max(playDuration || 2, 1), 5) * 1000;
     this.repeatRemaining = repeatCount - 1;
     this.onRepeatDone = onDone || null;
     this.onPlaySound = onPlaySound || null;
@@ -762,7 +767,7 @@ function Overlay() {
         setVfxText(p.text);
         setVfxTextColor(p.color);
         clearTimeout(vfxTextTimerRef.current);
-        vfxEngineRef.current?.trigger(p.effect, p.color, p.repeat_count, () => {
+        vfxEngineRef.current?.trigger(p.effect, p.color, p.repeat_count, p.play_duration, () => {
           setVfxText("");
         }, () => {
           playVfxSound(p.effect);
