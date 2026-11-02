@@ -745,6 +745,8 @@ fn todo_update(
     repeat_count: Option<u8>,
     play_duration: Option<u8>,
     danmaku_speed: Option<f64>,
+    // 撤销"完成"使用：Some(false) 将已完成待办恢复为未完成
+    completed: Option<bool>,
 ) -> Result<Todo, String> {
     // 校验 effect（仅接受 VFX_EFFECTS 内的值或 None）
     let effect = effect.map(|e| {
@@ -768,6 +770,7 @@ fn todo_update(
     if let Some(c) = repeat_count { todo.repeat_count = c.clamp(1, 10); }
     if let Some(d) = play_duration { todo.play_duration = d.clamp(1, 5); }
     if let Some(s) = danmaku_speed { todo.danmaku_speed = s.clamp(50.0, 250.0); }
+    if let Some(c) = completed { todo.completed = c; }
     let updated = todo.clone();
     *state.dirty.lock().unwrap() = true;
     Ok(updated)
@@ -1601,6 +1604,7 @@ mod tests {
         recurrence: Option<Option<String>>,
         effect: Option<Option<String>>,
         tag: Option<Option<String>>,
+        completed: Option<bool>,
     ) -> Todo {
         let effect = effect.map(|e| e.filter(|v| is_vfx_effect(v)));
         let tag = tag.map(|t| t.filter(|v| is_valid_tag(v)));
@@ -1612,6 +1616,7 @@ mod tests {
         if let Some(r) = recurrence { todo.recurrence = r; }
         if let Some(e) = effect { todo.effect = e; }
         if let Some(t) = tag { todo.tag = t; }
+        if let Some(c) = completed { todo.completed = c; }
         *state.dirty.lock().unwrap() = true;
         todo.clone()
     }
@@ -1787,6 +1792,7 @@ mod tests {
             Some(Some("daily".into())),
             Some(Some("particle".into())),
             Some(Some("生活".into())),
+            None,
         );
         assert_eq!(updated.title, "新标题");
         assert_eq!(updated.due_at, Some(3000000));
@@ -1804,7 +1810,7 @@ mod tests {
         state.todos.lock().unwrap().push(t);
         let updated = todo_update_sync(
             &state, id, None, None, None, None,
-            Some(Some("invalid".into())), None,
+            Some(Some("invalid".into())), None, None,
         );
         assert_eq!(updated.effect, None);
     }
@@ -1817,9 +1823,27 @@ mod tests {
         state.todos.lock().unwrap().push(t);
         let updated = todo_update_sync(
             &state, id, None, None, None, None, None,
-            Some(Some("无效".into())),
+            Some(Some("无效".into())), None,
         );
         assert_eq!(updated.tag, None);
+    }
+
+    /// 回归(P1-2)：撤销"完成"依赖 todo_update 支持 completed 字段。
+    /// 若后端移除该能力，本测试将无法通过编译/断言，直接变红。
+    #[test]
+    fn todo_update_can_uncomplete_todo() {
+        let state = test_state();
+        let mut t = make_todo("撤销完成", None, None, None);
+        t.completed = true;
+        let id = t.id.clone();
+        state.todos.lock().unwrap().push(t);
+        let updated = todo_update_sync(
+            &state, id.clone(), None, None, None, None, None, None,
+            Some(false),
+        );
+        assert!(!updated.completed);
+        let list = todos_list_sync(&state);
+        assert!(!list.iter().find(|t| t.id == id).unwrap().completed);
     }
 
     #[test]
