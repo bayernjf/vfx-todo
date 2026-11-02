@@ -658,16 +658,18 @@ function TodoItem({
           edit={edit}
           screens={screens}
           onSave={() => {
+            // patch 键名必须是 camelCase：Tauri v2 按 camelCase 反序列化命令参数，
+            // snake_case 键会被后端静默忽略。
             const patch: Record<string, unknown> = {};
             if (edit.title !== todo.title) patch.title = edit.title;
-            if (edit.dueAt !== todo.due_at) patch.due_at = edit.dueAt;
+            if (edit.dueAt !== todo.due_at) patch.dueAt = edit.dueAt;
             if (edit.screen !== (todo.screen ?? 0)) patch.screen = edit.screen;
             if (edit.recurrence !== (todo.recurrence ?? null)) patch.recurrence = edit.recurrence;
             if (edit.effect !== (todo.effect ?? "danmaku")) patch.effect = edit.effect;
             if (edit.tag !== (todo.tag ?? "")) patch.tag = edit.tag || null;
-            if (edit.repeatCount !== (todo.repeat_count ?? 1)) patch.repeat_count = edit.repeatCount;
-            if (edit.playDuration !== (todo.play_duration ?? 2)) patch.play_duration = edit.playDuration;
-            if (edit.danmakuSpeed !== (todo.danmaku_speed ?? 120)) patch.danmaku_speed = edit.danmakuSpeed;
+            if (edit.repeatCount !== (todo.repeat_count ?? 1)) patch.repeatCount = edit.repeatCount;
+            if (edit.playDuration !== (todo.play_duration ?? 2)) patch.playDuration = edit.playDuration;
+            if (edit.danmakuSpeed !== (todo.danmaku_speed ?? 120)) patch.danmakuSpeed = edit.danmakuSpeed;
             if (Object.keys(patch).length > 0) {
               onUpdate(todo.id, patch);
             }
