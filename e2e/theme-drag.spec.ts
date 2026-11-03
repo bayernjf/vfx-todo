@@ -102,10 +102,12 @@ test.describe("Drag and Drop", () => {
     const newTitles = await page.locator(".todo-title").allTextContents();
     expect(newTitles.length).toBe(3);
 
-    // At minimum, all items should still be present
-    // If reorder worked, the first item (A) should now be last
+    // 拖拽必须真的改变顺序：A 被拖到后面后，第一项不再是 A。
+    // 旧断言 `orderChanged || newTitles.length === 3` 因上一行已断言长度为 3 而恒真。
     const orderChanged = newTitles.some((t, i) => t !== initialTitles[i]);
-    expect(orderChanged || newTitles.length === 3).toBeTruthy();
+    expect(orderChanged).toBe(true);
+    expect(newTitles[0]).toMatch(/^Item B/);
+    expect(newTitles[2]).toMatch(/^Item A/);
   });
 
   test("drag over shows visual indicator during drag", async ({ page }) => {

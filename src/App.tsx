@@ -172,7 +172,7 @@ const DUE_PRESETS: { label: string; secs: number }[] = [
 // 工具函数
 // ══════════════════════════════════════════
 
-function formatDue(dueAt: number | null): string {
+export function formatDue(dueAt: number | null): string {
   if (!dueAt) return "";
   const now = Date.now();
   const diff = dueAt - now;
@@ -599,7 +599,7 @@ function IconTip({ tip, children }: { tip: string; children: React.ReactNode }) 
   );
 }
 
-function TodoItem({
+export function TodoItem({
   todo,
   screens,
   onComplete,
@@ -2109,4 +2109,4 @@ function App() {
 }
 
 export default App;
-export { ErrorBoundary };
+export { ErrorBoundary, EFFECT_LABEL, TAG_COLOR, EFFECT_COLOR };

@@ -263,7 +263,7 @@ void main() {
 }
 `;
 
-const SHADER_MAP: Record<string, string> = {
+export const SHADER_MAP: Record<string, string> = {
   shatter: SHATTER_FRAG_SRC,
   particle: PARTICLE_FRAG_SRC,
   rain: RAIN_FRAG_SRC,

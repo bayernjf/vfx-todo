@@ -1,21 +1,9 @@
 /**
  * 纯函数 & 常量单元测试
- * 不依赖 DOM / Tauri API，可直接运行
+ * 直接 import App.tsx 的真实实现/常量，不再在测试内复制一份。
  */
 import { describe, it, expect } from "vitest";
-
-// ====== formatDue ======
-// 直接在测试内实现一份，避免通过 React 组件间接测试
-function formatDue(dueAt: number | null): string {
-  if (!dueAt) return "";
-  const now = Date.now();
-  const diff = dueAt - now;
-  if (diff <= 0) return "已到期";
-  const mins = Math.floor(diff / 60000);
-  const secs = Math.floor((diff % 60000) / 1000);
-  if (mins >= 1) return `${mins}分${secs.toString().padStart(2, "0")}秒后`;
-  return `${secs}秒后`;
-}
+import { formatDue, EFFECT_LABEL, TAG_COLOR } from "../App";
 
 describe("formatDue", () => {
   it("returns empty for null", () => {
@@ -42,27 +30,25 @@ describe("formatDue", () => {
   });
 });
 
-// ====== 常量一致性 ======
 describe("constants", () => {
   it("EFFECT_LABEL covers all 8 effects (danmaku first)", () => {
-    const EXPECTED = ["danmaku", "shatter", "particle", "rain", "firework", "ripple", "laser", "glitch"];
-    for (const e of EXPECTED) {
-      expect(e).toBeTruthy();
-    }
-    expect(EXPECTED.length).toBe(8);
-    expect(EXPECTED[0]).toBe("danmaku");
+    expect(EFFECT_LABEL).toEqual({
+      danmaku: "弹幕",
+      shatter: "破碎",
+      particle: "粒子",
+      rain: "雨",
+      firework: "烟花",
+      ripple: "水波",
+      laser: "激光",
+      glitch: "故障",
+    });
   });
 
-  it("TAG_COLOR covers 工作/生活/紧急", () => {
-    const TAGS = ["工作", "生活", "紧急"];
-    const COLORS: Record<string, string> = {
+  it("TAG_COLOR covers 工作/生活/紧急 with hex colors", () => {
+    expect(TAG_COLOR).toEqual({
       工作: "#ff6b6b",
       生活: "#4ecdc4",
       紧急: "#f9ca24",
-    };
-    for (const t of TAGS) {
-      expect(COLORS[t]).toBeTruthy();
-      expect(COLORS[t]).toMatch(/^#[0-9a-fA-F]{6}$/);
-    }
+    });
   });
 });
