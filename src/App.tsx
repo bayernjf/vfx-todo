@@ -183,6 +183,21 @@ function formatDue(dueAt: number | null): string {
   return `${secs}秒后`;
 }
 
+// 公告链接协议白名单：只放行 http/https。远程公告 JSON 里的 url 会被直接放进
+// <a href>，若不限制协议，javascript:/data:/file:/vbscript: 会在 webview 内执行
+// 或打开本地文件（见 docs/reviews/2026-11-02-code-review.md P2-13）。
+export function isSafeExternalUrl(raw: string | null | undefined): raw is string {
+  if (typeof raw !== "string") return false;
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  try {
+    const { protocol } = new URL(trimmed);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function formatDateTime(ts: number | null): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -2065,7 +2080,7 @@ function App() {
             <div className="announcement-meta">{currentAnnouncement.date}</div>
             <pre className="modal-body">{currentAnnouncement.body}</pre>
             <div className="modal-actions">
-              {currentAnnouncement.url && (
+              {currentAnnouncement.url && isSafeExternalUrl(currentAnnouncement.url) && (
                 <a
                   href={currentAnnouncement.url}
                   target="_blank"
