@@ -474,6 +474,10 @@ fn spawn_overlay_windows(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn todo_list(state: tauri::State<'_, AppState>, tag: Option<String>) -> Result<Vec<Todo>, String> {
+    todo_list_impl(&state, tag)
+}
+
+fn todo_list_impl(state: &AppState, tag: Option<String>) -> Result<Vec<Todo>, String> {
     let todos = state.todos.lock().unwrap().clone();
     match tag {
         Some(ref t) if !t.is_empty() => Ok(todos
@@ -707,6 +711,32 @@ fn todo_create(
     play_duration: Option<u8>,
     danmaku_speed: Option<f64>,
 ) -> Result<Todo, String> {
+    todo_create_impl(
+        &state,
+        title,
+        due_at,
+        screen,
+        recurrence,
+        effect,
+        tag,
+        repeat_count,
+        play_duration,
+        danmaku_speed,
+    )
+}
+
+fn todo_create_impl(
+    state: &AppState,
+    title: String,
+    due_at: Option<i64>,
+    screen: Option<i32>,
+    recurrence: Option<String>,
+    effect: Option<String>,
+    tag: Option<String>,
+    repeat_count: Option<u8>,
+    play_duration: Option<u8>,
+    danmaku_speed: Option<f64>,
+) -> Result<Todo, String> {
     // 仅接受 VFX_EFFECTS 内的值；非法/None 一律存 None（默认弹幕）
     let effect = effect.and_then(|e| {
         if is_vfx_effect(&e) {
@@ -748,6 +778,10 @@ fn todo_create(
 
 #[tauri::command]
 fn todo_complete(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    todo_complete_impl(&state, id)
+}
+
+fn todo_complete_impl(state: &AppState, id: String) -> Result<(), String> {
     let mut todos = state.todos.lock().unwrap();
     for t in todos.iter_mut() {
         if t.id == id {
@@ -773,6 +807,37 @@ fn todo_update(
     play_duration: Option<u8>,
     danmaku_speed: Option<f64>,
     // 撤销"完成"使用：Some(false) 将已完成待办恢复为未完成
+    completed: Option<bool>,
+) -> Result<Todo, String> {
+    todo_update_impl(
+        &state,
+        id,
+        title,
+        due_at,
+        screen,
+        recurrence,
+        effect,
+        tag,
+        repeat_count,
+        play_duration,
+        danmaku_speed,
+        completed,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn todo_update_impl(
+    state: &AppState,
+    id: String,
+    title: Option<String>,
+    due_at: Option<Option<i64>>,
+    screen: Option<i32>,
+    recurrence: Option<Option<String>>,
+    effect: Option<Option<String>>,
+    tag: Option<Option<String>>,
+    repeat_count: Option<u8>,
+    play_duration: Option<u8>,
+    danmaku_speed: Option<f64>,
     completed: Option<bool>,
 ) -> Result<Todo, String> {
     // 校验 effect（仅接受 VFX_EFFECTS 内的值或 None）
@@ -805,6 +870,10 @@ fn todo_update(
 
 #[tauri::command]
 fn todo_delete(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    todo_delete_impl(&state, id)
+}
+
+fn todo_delete_impl(state: &AppState, id: String) -> Result<(), String> {
     let mut todos = state.todos.lock().unwrap();
     todos.retain(|t| t.id != id);
     *state.dirty.lock().unwrap() = true;
@@ -813,6 +882,10 @@ fn todo_delete(state: tauri::State<'_, AppState>, id: String) -> Result<(), Stri
 
 #[tauri::command]
 fn todo_clear_completed(state: tauri::State<'_, AppState>) -> Result<usize, String> {
+    todo_clear_completed_impl(&state)
+}
+
+fn todo_clear_completed_impl(state: &AppState) -> Result<usize, String> {
     let mut todos = state.todos.lock().unwrap();
     let before = todos.len();
     todos.retain(|t| !t.completed);
@@ -825,6 +898,10 @@ fn todo_clear_completed(state: tauri::State<'_, AppState>) -> Result<usize, Stri
 
 #[tauri::command]
 fn todo_batch_complete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    todo_batch_complete_impl(&state, ids)
+}
+
+fn todo_batch_complete_impl(state: &AppState, ids: Vec<String>) -> Result<usize, String> {
     let mut todos = state.todos.lock().unwrap();
     let mut count = 0usize;
     for id in &ids {
@@ -843,6 +920,10 @@ fn todo_batch_complete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> R
 
 #[tauri::command]
 fn todo_batch_delete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    todo_batch_delete_impl(&state, ids)
+}
+
+fn todo_batch_delete_impl(state: &AppState, ids: Vec<String>) -> Result<usize, String> {
     let mut todos = state.todos.lock().unwrap();
     let before = todos.len();
     todos.retain(|t| !ids.contains(&t.id));
@@ -856,6 +937,10 @@ fn todo_batch_delete(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Res
 /// 手动排序：按 ids 数组的顺序重新分配 order 字段
 #[tauri::command]
 fn todo_reorder(state: tauri::State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    todo_reorder_impl(&state, ids)
+}
+
+fn todo_reorder_impl(state: &AppState, ids: Vec<String>) -> Result<(), String> {
     let mut todos = state.todos.lock().unwrap();
     for (i, id) in ids.iter().enumerate() {
         if let Some(t) = todos.iter_mut().find(|t| t.id == *id) {
@@ -1925,111 +2010,6 @@ mod tests {
         );
     }
 
-    // Sync wrappers — 直接操作 AppState, 绕过 Tauri 命令壳, 测试同样的逻辑路径
-
-    fn todos_list_sync(state: &AppState) -> Vec<Todo> {
-        state.todos.lock().unwrap().clone()
-    }
-
-    fn todo_create_sync(
-        state: &AppState,
-        title: String,
-        due_at: Option<i64>,
-        screen: i32,
-        effect: Option<String>,
-        tag: Option<String>,
-    ) -> Todo {
-        let t = Todo {
-            id: Uuid::new_v4().to_string(),
-            title,
-            completed: false,
-            created_at: chrono::Utc::now().timestamp_millis(),
-            due_at,
-            screen,
-            recurrence: None,
-            effect: effect.filter(|e| is_vfx_effect(e)),
-            tag: tag.filter(|t| is_valid_tag(t)),
-            order: state.todos.lock().unwrap().len() as i64,
-            repeat_count: 1,
-            play_duration: 2,
-            danmaku_speed: 120.0,
-        };
-        state.todos.lock().unwrap().push(t.clone());
-        *state.dirty.lock().unwrap() = true;
-        t
-    }
-
-    fn todo_complete_sync(state: &AppState, id: String) -> Result<Todo, String> {
-        let mut todos = state.todos.lock().unwrap();
-        let todo = todos.iter_mut().find(|t| t.id == id).ok_or("not found")?;
-        todo.completed = true;
-        *state.dirty.lock().unwrap() = true;
-        Ok(todo.clone())
-    }
-
-    fn todo_delete_sync(state: &AppState, id: String) -> Result<(), String> {
-        let mut todos = state.todos.lock().unwrap();
-        let before = todos.len();
-        todos.retain(|t| t.id != id);
-        if todos.len() == before {
-            return Err("not found".into());
-        }
-        *state.dirty.lock().unwrap() = true;
-        Ok(())
-    }
-
-    fn todo_update_sync(
-        state: &AppState,
-        id: String,
-        title: Option<String>,
-        due_at: Option<Option<i64>>,
-        screen: Option<i32>,
-        recurrence: Option<Option<String>>,
-        effect: Option<Option<String>>,
-        tag: Option<Option<String>>,
-        completed: Option<bool>,
-    ) -> Todo {
-        let effect = effect.map(|e| e.filter(|v| is_vfx_effect(v)));
-        let tag = tag.map(|t| t.filter(|v| is_valid_tag(v)));
-        let mut todos = state.todos.lock().unwrap();
-        let todo = todos.iter_mut().find(|t| t.id == id).expect("todo not found");
-        if let Some(t) = title { todo.title = t; }
-        if let Some(d) = due_at { todo.due_at = d; }
-        if let Some(s) = screen { todo.screen = s; }
-        if let Some(r) = recurrence { todo.recurrence = r; }
-        if let Some(e) = effect { todo.effect = e; }
-        if let Some(t) = tag { todo.tag = t; }
-        if let Some(c) = completed { todo.completed = c; }
-        *state.dirty.lock().unwrap() = true;
-        todo.clone()
-    }
-
-    fn todo_clear_completed_sync(state: &AppState) -> usize {
-        let mut todos = state.todos.lock().unwrap();
-        let before = todos.len();
-        todos.retain(|t| !t.completed);
-        before - todos.len()
-    }
-
-    fn todo_batch_complete_sync(state: &AppState, ids: Vec<String>) -> usize {
-        let mut todos = state.todos.lock().unwrap();
-        let mut count = 0;
-        for id in &ids {
-            if let Some(t) = todos.iter_mut().find(|t| t.id == *id) {
-                if !t.completed { t.completed = true; count += 1; }
-            }
-        }
-        *state.dirty.lock().unwrap() = true;
-        count
-    }
-
-    fn todo_batch_delete_sync(state: &AppState, ids: Vec<String>) -> usize {
-        let mut todos = state.todos.lock().unwrap();
-        let before = todos.len();
-        todos.retain(|t| !ids.contains(&t.id));
-        before - todos.len()
-    }
-
     // ---------- Todo 数据模型 ----------
     #[test]
     fn todo_serialization_roundtrip() {
@@ -2089,6 +2069,7 @@ mod tests {
     }
 
     // ---------- Todo 列表 CRUD ----------
+    // 全部直接调用生产命令的 *_impl 核心，不再维护测试专用的复制实现。
     #[test]
     fn todo_list_returns_all() {
         let state = test_state();
@@ -2097,30 +2078,85 @@ mod tests {
             todos.push(make_todo("A", None, None, None));
             todos.push(make_todo("B", None, None, None));
         }
-        assert_eq!(todos_list_sync(&state).len(), 2);
+        assert_eq!(todo_list_impl(&state, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn todo_list_filters_by_tag() {
+        let state = test_state();
+        {
+            let mut todos = state.todos.lock().unwrap();
+            todos.push(make_todo("A", None, None, Some("工作".into())));
+            todos.push(make_todo("B", None, None, Some("生活".into())));
+        }
+        let filtered = todo_list_impl(&state, Some("工作".into())).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].title, "A");
     }
 
     #[test]
     fn todo_create_adds_to_list() {
         let state = test_state();
-        let created = todo_create_sync(
-            &state, "新任务".into(), None, 0,
-            Some("firework".into()), Some("工作".into()),
-        );
+        let created = todo_create_impl(
+            &state,
+            "新任务".into(),
+            None,
+            Some(0),
+            None,
+            Some("firework".into()),
+            Some("工作".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(created.title, "新任务");
         assert_eq!(created.effect, Some("firework".to_string()));
         assert_eq!(created.tag, Some("工作".to_string()));
-        assert_eq!(todos_list_sync(&state).len(), 1);
+        assert_eq!(created.repeat_count, 1);
+        assert_eq!(created.play_duration, 2);
+        assert_eq!(created.danmaku_speed, 120.0);
+        assert_eq!(todo_list_impl(&state, None).unwrap().len(), 1);
         assert!(!created.id.is_empty());
+    }
+
+    #[test]
+    fn todo_create_clamps_out_of_range_params() {
+        let state = test_state();
+        let created = todo_create_impl(
+            &state,
+            "越界参数".into(),
+            None,
+            Some(0),
+            None,
+            None,
+            None,
+            Some(99),
+            Some(0),
+            Some(9999.0),
+        )
+        .unwrap();
+        assert_eq!(created.repeat_count, 10);
+        assert_eq!(created.play_duration, 1);
+        assert_eq!(created.danmaku_speed, 250.0);
     }
 
     #[test]
     fn todo_create_rejects_invalid_effect_and_tag() {
         let state = test_state();
-        let created = todo_create_sync(
-            &state, "坏参数".into(), None, 0,
-            Some("boom".into()), Some("其他".into()),
-        );
+        let created = todo_create_impl(
+            &state,
+            "坏参数".into(),
+            None,
+            Some(0),
+            None,
+            Some("boom".into()),
+            Some("其他".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(created.effect, None);
         assert_eq!(created.tag, None);
     }
@@ -2131,14 +2167,17 @@ mod tests {
         let t = make_todo("完", None, None, None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        let updated = todo_complete_sync(&state, id).unwrap();
-        assert!(updated.completed);
+        todo_complete_impl(&state, id.clone()).unwrap();
+        let list = todo_list_impl(&state, None).unwrap();
+        assert!(list.iter().find(|t| t.id == id).unwrap().completed);
     }
 
     #[test]
-    fn todo_complete_nonexistent_returns_err() {
+    fn todo_complete_nonexistent_is_noop() {
+        // 生产命令对不存在 id 返回 Ok(())，不会报错。
         let state = test_state();
-        assert!(todo_complete_sync(&state, "ghost".into()).is_err());
+        assert!(todo_complete_impl(&state, "ghost".into()).is_ok());
+        assert_eq!(todo_list_impl(&state, None).unwrap().len(), 0);
     }
 
     #[test]
@@ -2149,16 +2188,18 @@ mod tests {
         let id1 = t1.id.clone();
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
-        todo_delete_sync(&state, id1).unwrap();
-        let list = todos_list_sync(&state);
+        todo_delete_impl(&state, id1).unwrap();
+        let list = todo_list_impl(&state, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "D2");
     }
 
     #[test]
-    fn todo_delete_nonexistent_returns_err() {
+    fn todo_delete_nonexistent_is_noop() {
+        // 生产命令对不存在 id 返回 Ok(())，不会报错。
         let state = test_state();
-        assert!(todo_delete_sync(&state, "ghost".into()).is_err());
+        assert!(todo_delete_impl(&state, "ghost".into()).is_ok());
+        assert_eq!(todo_list_impl(&state, None).unwrap().len(), 0);
     }
 
     #[test]
@@ -2167,22 +2208,30 @@ mod tests {
         let t = make_todo("旧标题", None, None, None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        let updated = todo_update_sync(
-            &state, id,
+        let updated = todo_update_impl(
+            &state,
+            id,
             Some("新标题".into()),
             Some(Some(3000000)),
             Some(1),
             Some(Some("daily".into())),
             Some(Some("particle".into())),
             Some(Some("生活".into())),
+            Some(99),
+            Some(0),
+            Some(9999.0),
             None,
-        );
+        )
+        .unwrap();
         assert_eq!(updated.title, "新标题");
         assert_eq!(updated.due_at, Some(3000000));
         assert_eq!(updated.screen, 1);
         assert_eq!(updated.recurrence, Some("daily".to_string()));
         assert_eq!(updated.effect, Some("particle".to_string()));
         assert_eq!(updated.tag, Some("生活".to_string()));
+        assert_eq!(updated.repeat_count, 10);
+        assert_eq!(updated.play_duration, 1);
+        assert_eq!(updated.danmaku_speed, 250.0);
     }
 
     #[test]
@@ -2191,10 +2240,21 @@ mod tests {
         let t = make_todo("坏特效", None, Some("particle".into()), None);
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        let updated = todo_update_sync(
-            &state, id, None, None, None, None,
-            Some(Some("invalid".into())), None, None,
-        );
+        let updated = todo_update_impl(
+            &state,
+            id,
+            None,
+            None,
+            None,
+            None,
+            Some(Some("invalid".into())),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(updated.effect, None);
     }
 
@@ -2204,11 +2264,42 @@ mod tests {
         let t = make_todo("坏标签", None, None, Some("工作".into()));
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        let updated = todo_update_sync(
-            &state, id, None, None, None, None, None,
-            Some(Some("无效".into())), None,
-        );
+        let updated = todo_update_impl(
+            &state,
+            id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Some("无效".into())),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(updated.tag, None);
+    }
+
+    #[test]
+    fn todo_update_nonexistent_returns_err() {
+        let state = test_state();
+        let result = todo_update_impl(
+            &state,
+            "ghost".into(),
+            Some("x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
     }
 
     /// 回归(P1-2)：撤销"完成"依赖 todo_update 支持 completed 字段。
@@ -2220,12 +2311,23 @@ mod tests {
         t.completed = true;
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        let updated = todo_update_sync(
-            &state, id.clone(), None, None, None, None, None, None,
+        let updated = todo_update_impl(
+            &state,
+            id.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             Some(false),
-        );
+        )
+        .unwrap();
         assert!(!updated.completed);
-        let list = todos_list_sync(&state);
+        let list = todo_list_impl(&state, None).unwrap();
         assert!(!list.iter().find(|t| t.id == id).unwrap().completed);
     }
 
@@ -2237,8 +2339,8 @@ mod tests {
         t2.completed = true;
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
-        assert_eq!(todo_clear_completed_sync(&state), 1);
-        let list = todos_list_sync(&state);
+        assert_eq!(todo_clear_completed_impl(&state).unwrap(), 1);
+        let list = todo_list_impl(&state, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "未完成");
     }
@@ -2254,8 +2356,8 @@ mod tests {
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
         state.todos.lock().unwrap().push(t3);
-        assert_eq!(todo_batch_complete_sync(&state, batch_ids), 2);
-        let list = todos_list_sync(&state);
+        assert_eq!(todo_batch_complete_impl(&state, batch_ids).unwrap(), 2);
+        let list = todo_list_impl(&state, None).unwrap();
         assert!(list.iter().find(|t| t.id == ids[0]).unwrap().completed);
         assert!(!list.iter().find(|t| t.id == ids[1]).unwrap().completed);
         assert!(list.iter().find(|t| t.id == ids[2]).unwrap().completed);
@@ -2271,8 +2373,8 @@ mod tests {
         state.todos.lock().unwrap().push(t1);
         state.todos.lock().unwrap().push(t2);
         state.todos.lock().unwrap().push(t3);
-        assert_eq!(todo_batch_delete_sync(&state, ids_to_delete), 2);
-        let list = todos_list_sync(&state);
+        assert_eq!(todo_batch_delete_impl(&state, ids_to_delete).unwrap(), 2);
+        let list = todo_list_impl(&state, None).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "R2");
     }
@@ -2280,7 +2382,21 @@ mod tests {
     #[test]
     fn todo_batch_delete_empty_list_noop() {
         let state = test_state();
-        assert_eq!(todo_batch_delete_sync(&state, vec!["x".into()]), 0);
+        assert_eq!(todo_batch_delete_impl(&state, vec!["x".into()]).unwrap(), 0);
+    }
+
+    #[test]
+    fn todo_reorder_assigns_order_by_ids() {
+        let state = test_state();
+        let t1 = make_todo("A", None, None, None);
+        let t2 = make_todo("B", None, None, None);
+        let ids = vec![t2.id.clone(), t1.id.clone()];
+        state.todos.lock().unwrap().push(t1);
+        state.todos.lock().unwrap().push(t2);
+        todo_reorder_impl(&state, ids).unwrap();
+        let list = todo_list_impl(&state, None).unwrap();
+        assert_eq!(list.iter().find(|t| t.title == "A").unwrap().order, 1);
+        assert_eq!(list.iter().find(|t| t.title == "B").unwrap().order, 0);
     }
 
     // ---------- 偏好设置 ----------
@@ -2349,21 +2465,21 @@ mod tests {
         t.completed = true;
         let id = t.id.clone();
         state.todos.lock().unwrap().push(t);
-        assert_eq!(todo_batch_complete_sync(&state, vec![id]), 0);
+        assert_eq!(todo_batch_complete_impl(&state, vec![id]).unwrap(), 0);
     }
 
     // ---------- 边界条件 ----------
     #[test]
     fn empty_todo_list_clear_returns_zero() {
         let state = test_state();
-        assert_eq!(todo_clear_completed_sync(&state), 0);
+        assert_eq!(todo_clear_completed_impl(&state).unwrap(), 0);
     }
 
     #[test]
     fn created_todo_has_unique_ids() {
         let state = test_state();
-        let a = todo_create_sync(&state, "A".into(), None, 0, None, None);
-        let b = todo_create_sync(&state, "B".into(), None, 0, None, None);
+        let a = todo_create_impl(&state, "A".into(), None, Some(0), None, None, None, None, None, None).unwrap();
+        let b = todo_create_impl(&state, "B".into(), None, Some(0), None, None, None, None, None, None).unwrap();
         assert_ne!(a.id, b.id);
     }
 }
