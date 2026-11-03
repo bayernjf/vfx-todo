@@ -1391,6 +1391,32 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
     Ok(())
 }
 
+/// P2-4：导入行的 effect/tag/recurrence 统一校验（非法值落 None，与 todo_create 的
+/// 口径一致）；此前 CSV 分支 recurrence 不校验、JSON 分支三个字段都不校验。
+fn normalize_imported(mut t: Todo) -> Todo {
+    t.effect = t.effect.filter(|e| is_vfx_effect(e));
+    t.tag = t.tag.filter(|g| is_valid_tag(g));
+    t.recurrence = t.recurrence.filter(|r| matches!(r.as_str(), "daily" | "weekly"));
+    t
+}
+
+/// P2-4：导入合并前去重——id 与现有重复或批内重复的行一律跳过。
+///（complete/delete 按首个匹配操作，重复 id 会作用到错误对象。）
+fn merge_imported_todos(existing: &[Todo], imported: Vec<Todo>) -> (Vec<Todo>, usize) {
+    let mut seen: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.id.clone()).collect();
+    let mut kept = Vec::with_capacity(imported.len());
+    let mut skipped = 0usize;
+    for t in imported {
+        if seen.insert(t.id.clone()) {
+            kept.push(t);
+        } else {
+            skipped += 1;
+        }
+    }
+    (kept, skipped)
+}
+
 #[tauri::command]
 async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, format: String) -> Result<usize, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -1402,22 +1428,25 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
 
     let data = std::fs::read_to_string(path.as_path().unwrap()).map_err(|e| e.to_string())?;
     let imported: Vec<Todo> = match format.as_str() {
-        "json" => serde_json::from_str(&data).map_err(|e| e.to_string())?,
+        "json" => serde_json::from_str::<Vec<Todo>>(&data)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(normalize_imported)
+            .collect(),
         "csv" => {
             let mut result = Vec::new();
             for (i, parts) in parse_csv(&data).into_iter().enumerate() {
                 if i == 0 { continue; }
                 if parts.len() < 7 { continue; }
                 // 列顺序：id,title,completed,created_at,due_at,screen,recurrence,effect,tag
+                // effect/tag/recurrence 的合法性由 normalize_imported 统一收口
                 let effect = parts
                     .get(7)
-                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
-                    .and_then(|e| if is_vfx_effect(&e) { Some(e) } else { None });
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
                 let tag = parts
                     .get(8)
-                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) })
-                    .and_then(|t| if is_valid_tag(&t) { Some(t) } else { None });
-                result.push(Todo {
+                    .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
+                result.push(normalize_imported(Todo {
                     id: parts[0].clone(),
                     title: parts[1].clone(),
                     completed: parts[2].parse().unwrap_or(false),
@@ -1431,15 +1460,19 @@ async fn import_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     repeat_count: parts.get(9).and_then(|s| s.parse().ok()).unwrap_or(1).clamp(1, 10),
                     play_duration: parts.get(10).and_then(|s| s.parse().ok()).unwrap_or(2).clamp(1, 5),
                     danmaku_speed: parts.get(11).and_then(|s| s.parse::<f64>().ok()).unwrap_or(120.0).clamp(50.0, 250.0),
-                });
+                }));
             }
             result
         }
         _ => return Err("unsupported format".to_string()),
     };
-    let count = imported.len();
     let mut todos = state.todos.lock().unwrap();
-    todos.extend(imported);
+    let (kept, skipped) = merge_imported_todos(&todos, imported);
+    if skipped > 0 {
+        log::warn!("import: skipped {skipped} rows with duplicate ids");
+    }
+    let count = kept.len();
+    todos.extend(kept);
     *state.dirty.lock().unwrap() = true;
     Ok(count)
 }
@@ -1736,6 +1769,64 @@ mod tests {
         assert_eq!(r[9].parse::<u8>().unwrap().clamp(1, 10), 7);
         assert_eq!(r[10].parse::<u8>().unwrap().clamp(1, 5), 5);
         assert_eq!(r[11].parse::<f64>().unwrap().clamp(50.0, 250.0), 250.0);
+    }
+
+    // ---------- 导入去重与字段校验（P2-4 回归） ----------
+
+    fn todo_with_id(id: &str) -> Todo {
+        let mut t = make_todo("t", None, None, None);
+        t.id = id.to_string();
+        t
+    }
+
+    #[test]
+    fn import_dedup_skips_existing_and_intra_batch_duplicates() {
+        let existing = vec![todo_with_id("a"), todo_with_id("b")];
+        let imported = vec![
+            todo_with_id("a"), // 与现有重复 → 跳
+            todo_with_id("c"),
+            todo_with_id("c"), // 批内重复 → 跳
+            todo_with_id("d"),
+        ];
+        let (kept, skipped) = merge_imported_todos(&existing, imported);
+        assert_eq!(skipped, 2);
+        assert_eq!(
+            kept.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["c", "d"]
+        );
+    }
+
+    #[test]
+    fn import_dedup_keeps_all_when_unique() {
+        let existing = vec![todo_with_id("a")];
+        let imported = vec![todo_with_id("b"), todo_with_id("c")];
+        let (kept, skipped) = merge_imported_todos(&existing, imported);
+        assert_eq!(skipped, 0);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn normalize_imported_drops_invalid_effect_tag_recurrence() {
+        let mut t = todo_with_id("x");
+        t.effect = Some("not-a-real-effect".into());
+        t.tag = Some("虚构标签".into());
+        t.recurrence = Some("hourly".into());
+        let n = normalize_imported(t);
+        assert!(n.effect.is_none());
+        assert!(n.tag.is_none());
+        assert!(n.recurrence.is_none());
+    }
+
+    #[test]
+    fn normalize_imported_keeps_valid_fields() {
+        let mut t = todo_with_id("x");
+        t.effect = Some("firework".into());
+        t.tag = Some("工作".into());
+        t.recurrence = Some("daily".into());
+        let n = normalize_imported(t);
+        assert_eq!(n.effect.as_deref(), Some("firework"));
+        assert_eq!(n.tag.as_deref(), Some("工作"));
+        assert_eq!(n.recurrence.as_deref(), Some("daily"));
     }
 
     // ---------- 持久化标记编排（P2-1 回归） ----------
