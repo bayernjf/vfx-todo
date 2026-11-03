@@ -290,6 +290,19 @@ fn dispatch_by_effect_multi(app: &tauri::AppHandle, text: &str, effect: &str, sc
 
 // ============ 调度引擎：后台轮询到期 ToDo ============
 
+/// 循环任务的下一个到期时刻（评审 P2-6）：从 due 起按 step 推进到严格大于 now。
+///
+/// 停机 N 天后重开时 due+step 可能仍在过去；旧写法直接用它建实例，新实例下一轮
+/// tick 又到期、再建一个仍过期的实例——每秒补放一次直到追上现在（N 次特效+通知
+/// 风暴）。推进到未来后，停机期间只补当前这一次。
+fn next_recurrence_due(due: i64, now: i64, step: i64) -> i64 {
+    let mut next = due + step;
+    while next <= now {
+        next += step;
+    }
+    next
+}
+
 fn start_scheduler(app: tauri::AppHandle, state: AppState) {
     std::thread::spawn(move || {
         loop {
@@ -339,19 +352,19 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
 
                             // 重复任务：自动创建下一个实例
                             if let Some(ref rec) = todo.recurrence {
-                                let next_due = match rec.as_str() {
-                                    "daily" => due + 24 * 60 * 60 * 1000,
-                                    "weekly" => due + 7 * 24 * 60 * 60 * 1000,
-                                    _ => due,
+                                let step: i64 = match rec.as_str() {
+                                    "daily" => 24 * 60 * 60 * 1000,
+                                    "weekly" => 7 * 24 * 60 * 60 * 1000,
+                                    _ => 0,
                                 };
-                                if next_due > due {
+                                if step > 0 {
                                     let order = (base_count + new_todos.len()) as i64;
-                                new_todos.push(Todo {
-                                    id: gen_id(),
-                                    title: todo.title.clone(),
-                                    completed: false,
+                                    new_todos.push(Todo {
+                                        id: gen_id(),
+                                        title: todo.title.clone(),
+                                        completed: false,
                                         created_at: now,
-                                        due_at: Some(next_due),
+                                        due_at: Some(next_recurrence_due(due, now, step)),
                                         screen: todo.screen,
                                         recurrence: todo.recurrence.clone(),
                                         effect: todo.effect.clone(),
@@ -1769,6 +1782,40 @@ mod tests {
         assert_eq!(r[9].parse::<u8>().unwrap().clamp(1, 10), 7);
         assert_eq!(r[10].parse::<u8>().unwrap().clamp(1, 5), 5);
         assert_eq!(r[11].parse::<f64>().unwrap().clamp(50.0, 250.0), 250.0);
+    }
+
+    // ---------- 循环任务补放风暴（P2-6 回归） ----------
+
+    #[test]
+    fn next_recurrence_due_normal_case_single_step() {
+        // 正常运行：due 刚过，下一个实例在 due+step（未来）
+        let now = 1_000_000_i64;
+        let due = now - 1000;
+        let step = 86_400_000;
+        assert_eq!(next_recurrence_due(due, now, step), due + step);
+    }
+
+    #[test]
+    fn next_recurrence_due_after_multi_day_downtime_lands_in_future() {
+        // 停机 3.5 天：daily 任务到期后只补当前一次，下一个实例落在未来，
+        // 而不是 due+1d（仍过去）→ 下轮 tick 再次到期的连环补放。
+        let step = 86_400_000_i64;
+        let now = 10_000_000_000_i64;
+        let due = now - 3 * step - 3600_000; // 3 天零 1 小时前到期
+        let next = next_recurrence_due(due, now, step);
+        assert!(next > now, "下一个实例必须在未来，实得 {}", next);
+        assert!(next <= now + step, "最多推进到下一个周期，实得 {}", next);
+        // 恰好跨过 4 个周期（3 天 1 小时 → 第 4 个 step 才在未来）
+        assert_eq!(next, due + 4 * step);
+    }
+
+    #[test]
+    fn next_recurrence_due_exact_boundary_advances_once_more() {
+        // due+step == now：恰到期视为本轮已补，下一个实例须严格大于 now
+        let step = 86_400_000_i64;
+        let now = 5_000_000_000_i64;
+        let due = now - step;
+        assert_eq!(next_recurrence_due(due, now, step), due + 2 * step);
     }
 
     // ---------- 导入去重与字段校验（P2-4 回归） ----------
