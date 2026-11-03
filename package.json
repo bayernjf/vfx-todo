@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint . --ext ts,tsx",
+    "lint": "eslint .",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,6 +27,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
     "@tauri-apps/cli": "^2.1.0",
     "@testing-library/jest-dom": "^6.9.1",
@@ -36,8 +37,10 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.14.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^5.4.10",
     "vitest": "^4.1.10"
   }

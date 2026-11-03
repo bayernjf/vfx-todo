@@ -76,24 +76,6 @@ const COMMAND_PARAMS: Record<string, string[]> = {
   import_todos: ["format"],
 };
 
-function makeTodo(t: any, i = 0): any {
-  return {
-    id: t.id || `id-${i}-${t.title}`,
-    title: t.title,
-    completed: t.completed ?? false,
-    created_at: t.created_at ?? Date.now() - (i + 1) * 60000,
-    due_at: t.due_at ?? t.due_time ?? null,
-    screen: t.screen ?? 0,
-    recurrence: t.recurrence ?? null,
-    effect: t.effect ?? null,
-    tag: t.tag ?? null,
-    order: t.order ?? 0,
-    repeat_count: t.repeat_count ?? 1,
-    play_duration: t.play_duration ?? 2,
-    danmaku_speed: t.danmaku_speed ?? 120,
-  };
-}
-
 export function getTauriMockScript(screens: MockScreen[] = DEFAULT_SCREENS): string {
   return `
     (() => {

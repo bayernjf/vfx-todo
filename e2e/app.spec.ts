@@ -18,8 +18,6 @@ const SAVE_BTN = ".todo-btn.save";
 const CANCEL_BTN = ".todo-btn.cancel";
 const TODO_EMPTY = ".todo-empty";
 const UNDO_TOAST = ".undo-toast";
-const UNDO_BTN = ".undo-toast-btn";
-const UNDO_CLOSE = ".undo-toast-close";
 const COMPLETED_ITEM = ".todo-item.completed";
 const TAG_BADGE = ".tag-badge";
 
