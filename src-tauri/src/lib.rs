@@ -1356,7 +1356,9 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
     let content = match format.as_str() {
         "json" => serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?,
         "csv" => {
-            let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag\n");
+            // P2-5：导出补齐 repeat_count/play_duration/danmaku_speed 三列——导入侧一直
+            // 在读第 10-12 列，此前 round-trip 会静默丢特效参数。
+            let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag,repeat_count,play_duration,danmaku_speed\n");
             for t in todos {
                 let fields = [
                     t.id,
@@ -1368,6 +1370,9 @@ async fn export_todos(app: tauri::AppHandle, state: tauri::State<'_, AppState>, 
                     t.recurrence.unwrap_or_default(),
                     t.effect.unwrap_or_default(),
                     t.tag.unwrap_or_default(),
+                    t.repeat_count.to_string(),
+                    t.play_duration.to_string(),
+                    t.danmaku_speed.to_string(),
                 ];
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
@@ -1694,26 +1699,43 @@ mod tests {
 
     #[test]
     fn csv_roundtrip_special_titles() {
-        // 导出 9 列 → 跳过表头解析 → 逐字段全等（旧实现含逗号标题全字段错位）
+        // 导出 12 列 → 跳过表头解析 → 逐字段全等（旧实现含逗号标题全字段错位）
         let titles = ["开会, 讨论", "say \"hi\"", "line1\nline2", "plain", "尾随,"];
-        let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag\n");
+        let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag,repeat_count,play_duration,danmaku_speed\n");
         for (i, title) in titles.iter().enumerate() {
             csv.push_str(&csv_row(&[
-                &format!("id{i}"), title, "false", "1000000", "", "0", "", "firework", "工作",
+                &format!("id{i}"), title, "false", "1000000", "", "0", "", "firework", "工作", "3", "4", "180",
             ]));
         }
         let rows = parse_csv(&csv);
         assert_eq!(rows.len(), titles.len() + 1);
         for (i, title) in titles.iter().enumerate() {
             let r = &rows[i + 1];
-            assert_eq!(r.len(), 9, "row {i} column count");
+            assert_eq!(r.len(), 12, "row {i} column count");
             assert_eq!(r[0], format!("id{i}"));
             assert_eq!(&r[1], title);
             assert_eq!(r[2], "false");
             assert_eq!(r[3], "1000000");
             assert_eq!(r[7], "firework");
             assert_eq!(r[8], "工作");
+            assert_eq!(r[9], "3");
+            assert_eq!(r[10], "4");
+            assert_eq!(r[11], "180");
         }
+    }
+
+    #[test]
+    fn csv_roundtrip_preserves_effect_params() {
+        // P2-5 回归：repeat_count/play_duration/danmaku_speed 必须在导出列里且
+        // 能被导入侧读回（此前导出只写 9 列，round-trip 静默丢失特效参数）。
+        let mut csv = String::from("id,title,completed,created_at,due_at,screen,recurrence,effect,tag,repeat_count,play_duration,danmaku_speed\n");
+        csv.push_str(&csv_row(&["id1", "特效待办", "false", "1000000", "", "0", "", "shatter", "", "7", "5", "250"]));
+        let rows = parse_csv(&csv);
+        let r = &rows[1];
+        // 与导入侧 parts.get(9/10/11) 同位置读回
+        assert_eq!(r[9].parse::<u8>().unwrap().clamp(1, 10), 7);
+        assert_eq!(r[10].parse::<u8>().unwrap().clamp(1, 5), 5);
+        assert_eq!(r[11].parse::<f64>().unwrap().clamp(50.0, 250.0), 250.0);
     }
 
     // ---------- 持久化标记编排（P2-1 回归） ----------
