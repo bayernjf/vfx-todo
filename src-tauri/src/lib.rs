@@ -383,19 +383,33 @@ fn start_scheduler(app: tauri::AppHandle, state: AppState) {
     });
 }
 
+/// 持久化一轮的标记编排（评审 P2-1）。
+///
+/// 顺序是正确性本身：**先清 dirty、再 clone、再写盘**。写盘期间（clone 之后）
+/// 发生的新修改会重新置位 dirty，下一轮再写——不会丢。旧顺序（clone→写盘→
+/// 置 false）会把 clone 后的修改标记覆盖掉，若此后无新修改，退出时丢最多 5s 数据。
+/// 写盘失败恢复 dirty=true，下轮重试（不做退避，5s 一轮的成本可忽略）。
+fn persist_once<F>(state: &AppState, write: F) -> bool
+where
+    F: FnOnce(&[Todo]) -> Result<(), String>,
+{
+    if !*state.dirty.lock().unwrap() {
+        return false;
+    }
+    *state.dirty.lock().unwrap() = false;
+    let todos = state.todos.lock().unwrap().clone();
+    if let Err(e) = write(&todos) {
+        log::warn!("persist failed: {e}");
+        *state.dirty.lock().unwrap() = true;
+    }
+    true
+}
+
 fn start_persist_thread(app: tauri::AppHandle, state: AppState) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(5));
-            let dirty = *state.dirty.lock().unwrap();
-            if dirty {
-                let todos = state.todos.lock().unwrap().clone();
-                if let Err(e) = save_todos(&app, &todos) {
-                    log::warn!("persist failed: {e}");
-                } else {
-                    *state.dirty.lock().unwrap() = false;
-                }
-            }
+            persist_once(&state, |todos| save_todos(&app, todos));
         }
     });
 }
@@ -1700,6 +1714,55 @@ mod tests {
             assert_eq!(r[7], "firework");
             assert_eq!(r[8], "工作");
         }
+    }
+
+    // ---------- 持久化标记编排（P2-1 回归） ----------
+
+    #[test]
+    fn persist_once_clean_state_skips_write() {
+        let state = test_state();
+        let mut calls = 0;
+        let wrote = persist_once(&state, |_| {
+            calls += 1;
+            Ok(())
+        });
+        assert!(!wrote);
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn persist_once_success_clears_dirty() {
+        let state = test_state();
+        *state.dirty.lock().unwrap() = true;
+        let wrote = persist_once(&state, |_| Ok(()));
+        assert!(wrote);
+        assert!(!*state.dirty.lock().unwrap());
+    }
+
+    #[test]
+    fn persist_once_failure_restores_dirty_for_retry() {
+        let state = test_state();
+        *state.dirty.lock().unwrap() = true;
+        let wrote = persist_once(&state, |_| Err("disk full".into()));
+        assert!(wrote);
+        assert!(*state.dirty.lock().unwrap(), "写盘失败必须恢复 dirty 供下轮重试");
+    }
+
+    #[test]
+    fn persist_once_mutation_during_write_is_not_clobbered() {
+        // P2-1 核心回归：模拟"clone 之后、写盘完成之前"发生的新修改（writer 回调里
+        // 置位 dirty 模拟并发写入——此刻 persist_once 不持任何锁，不会死锁）。旧顺序
+        //（写完再清）会把它覆盖丢数据；新顺序下该标记必须存活，下一轮持久化把它写出去。
+        let state = test_state();
+        *state.dirty.lock().unwrap() = true;
+        persist_once(&state, |_| {
+            *state.dirty.lock().unwrap() = true;
+            Ok(())
+        });
+        assert!(
+            *state.dirty.lock().unwrap(),
+            "写盘期间的并发修改标记被覆盖——回到旧竞态"
+        );
     }
 
     // Sync wrappers — 直接操作 AppState, 绕过 Tauri 命令壳, 测试同样的逻辑路径
